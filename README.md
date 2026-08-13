@@ -71,11 +71,13 @@ The reader itself needs no companion app.
 
 ## iOS companion
 
-The native app lives in `ios/`. It targets iOS 17+, stores up to ten priorities
-locally, reconnects to the last X3 through CoreBluetooth state restoration, and
-serializes every GATT write with a response and an 8-second recovery timeout.
-Lume uses dedicated GATT UUIDs and a deterministic random-static BLE identity,
-so the upstream Flowe app can remain installed without answering Lume sync requests.
+The native app lives in `ios/`. It targets iOS 17+, stores up to ten priorities,
+projects the next 24 hours of EventKit calendar events and open reminders into
+the firmware's six-item Today view, reconnects to the last X3 through CoreBluetooth
+state restoration, and serializes every GATT write with a response and an 8-second
+recovery timeout. Lume uses dedicated GATT UUIDs and a deterministic random-static
+BLE identity, so the upstream Flowe app can remain installed without answering
+Lume sync requests.
 
 Generate, build and test it with:
 

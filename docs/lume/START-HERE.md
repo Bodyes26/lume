@@ -80,14 +80,16 @@ cd xphone-os
 
 ```sh
 cd ios
+export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
 xcodegen generate
-xcodebuild build -project Lume.xcodeproj -target Lume \
-  -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+xcodebuild build -project Lume.xcodeproj -scheme Lume \
+  -configuration Debug -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 swift test
 ```
 
 Per il device reale il progetto usa il team `XTU68E98BM`; l'iPhone 16 Pro di
-Maurizio usa iOS 27 e la build firmata è verificata con `/Applications/Xcode-beta.app`.
+Maurizio usa iOS 27. Priorities, Today/EventKit e l'icona aggiornata sono verificati
+su hardware con `/Applications/Xcode-beta.app`.
 
 Prima di flashare, verificare che il cavo pogo sia quello dati a 4 pin. Non usare
 comandi distruttivi sulla SD e non inizializzare il display finché il guard X3 non ha

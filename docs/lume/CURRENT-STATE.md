@@ -1,11 +1,12 @@
 # Lume — stato operativo e handoff
 
-**Aggiornato:** 13 agosto 2026  
+**Aggiornato:** 14 agosto 2026  
 **Versione firmware:** `0.1.0-dev`  
 **Versione app iOS:** `0.2.0-dev`  
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
-**Commit vertical slice v0.2:** `75639a3`  
-**Fase:** firmware v0.1 accettato; vertical slice app iOS v0.2 verificato end-to-end su iPhone e X3.
+**Commit vertical slice Priorities:** `75639a3`  
+**Commit Today/EventKit + icona:** `90777cf`  
+**Fase:** firmware v0.1 accettato; Priorities e Today verificati end-to-end su iPhone e X3.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -21,7 +22,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Identità a compile time | **VERIFICATA** | stringhe, UUID GATT Lume, identità BLE random-static, asset/env/release compilano |
 | Boot e resa sul vetro | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
-| App iOS Lume v0.2 | **VERIFICATA SU HARDWARE** | build firmata e installata su iPhone 16 Pro/iOS 27; pairing, `time.sync`, snapshot Priorities e toggle bidirezionale riusciti |
+| App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
 
 ## Cosa è stato implementato in v0.1
 
@@ -194,6 +195,7 @@ Il 13/08/2026 Maurizio ha verificato il vertical slice sul telefono e sul vero X
 - [x] priorità `Prova Lume` creata sull'iPhone, richiesta dall'X3 e renderizzata;
 - [x] toggle eseguito sull'X3, propagato all'iPhone e rispedito come snapshot;
 - [x] reinstallazione della build finale e reconnect automatico riusciti;
+- [x] deep-sleep di circa due ore, wake e ripresa normale verificati da Maurizio;
 - [x] vecchia app Flowe isolata: dopo UUID e identità BLE dedicati, il seriale
   mostra un solo snapshot `priorities-sync-…`, senza la seconda card `p-…`.
 
@@ -202,11 +204,29 @@ inviava lo snapshot corretto e Flowe rispondeva subito dopo alla stessa notify,
 sovrascrivendolo. Cambiare i soli UUID non bastava per via della cache
 CoreBluetooth; la nuova identità random-static risolve anche quel percorso.
 
+## Prova hardware Today/EventKit — completata
+
+Il 14/08/2026 è stato completato e verificato il secondo flusso reale dell'app:
+
+- [x] richieste iOS 17+ di accesso completo a Calendario e Promemoria;
+- [x] proiezione deterministica delle prossime 24 ore: eventi in corso/futuri,
+  promemoria aperti, massimo sei elementi come il `TodayStore` firmware;
+- [x] payload `today.snapshot` entro 512 B, con item compatti a cinque campi e
+  risposta a `today.sync.request`;
+- [x] interfaccia SwiftUI verificata in Simulator sia prima sia dopo i permessi;
+- [x] build firmata installata sull'iPhone reale;
+- [x] agenda sincronizzata e visualizzata correttamente sul vero X3;
+- [x] nuova icona Lume visualizzata correttamente sulla Home dell'iPhone.
+
+Verifiche automatiche: `swift test` con **7/7 PASS** (4 protocollo esistenti +
+3 Today); build Simulator e build firmata iPhone entrambe **BUILD SUCCEEDED**.
+
 ## Prossime azioni
 
-1. Verificare reconnect dopo un ciclo completo deep-sleep/wake e il recovery del
-   timeout GATT scollegando intenzionalmente il device durante una write.
-2. Implementare Today/EventKit come prossimo vertical slice dell'app iOS.
+1. Implementare l'italiano completo con selettore a caldo, come definito nella
+   milestone v0.3.
+2. Verificare il recovery del timeout GATT scollegando intenzionalmente il
+   device durante una write.
 3. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
    `upstream` fetch-only.
 4. Non anticipare Screen Time: richiede Apple Developer Program a pagamento.

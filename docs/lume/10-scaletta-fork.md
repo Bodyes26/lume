@@ -62,6 +62,9 @@ App:
    split `part`/`parts`) + consumo di `priority.toggle`.
 5. [x] Prova end-to-end su iPhone 16 Pro/iOS 27: pairing, `time.sync`,
    snapshot Priorities, toggle X3→iPhone e reconnect dopo reinstallazione.
+6. [x] Today/EventKit: consenso Calendario + Promemoria, proiezione delle
+   prossime 24 ore, snapshot `today.snapshot` entro 512 B, refresh manuale e
+   risposta a `today.sync.request`; verificato sul vero iPhone/X3.
 
 Firmware:
 * [x] Gate GATT cifrato per Card Write e Action Read/Notify.
@@ -71,7 +74,8 @@ Firmware:
   dall'app upstream ancora installata.
 
 *Prova di accettazione*: priorità create sul telefono che compaiono sul vetro e
-si spuntano col tasto, poi reconnect senza riavviare l'app.
+si spuntano col tasto; agenda reale che appare in Today; reconnect senza riavviare
+l'app. Tutti e tre i percorsi sono verificati su hardware.
 
 ## v0.3 — Italiano completo con switcher
 
