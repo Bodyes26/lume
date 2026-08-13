@@ -3,7 +3,7 @@
 **Aggiornato:** 13 agosto 2026  
 **Versione in sviluppo:** `0.1.0-dev`  
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
-**Fase:** sorgente v0.1 implementato e compilato; prova su X3 non eseguita perché il device non è collegato.
+**Fase:** v0.1 flashata su X3; boot/launcher e radio osservati, checklist hardware restante ancora aperta.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -17,8 +17,8 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Build upstream di riferimento | **VERIFICATA** | `xteink` prima delle modifiche: SUCCESS; flash 2.532.155 B, RAM 145.004 B |
 | Build Lume X3-only | **VERIFICATA** | `lume-x3`: SUCCESS; flash 2.526.151 B, RAM 144.988 B |
 | Identità a compile time | **VERIFICATA** | stringhe, UUID preservati, asset/env/release compilano |
-| Boot e resa sul vetro | **NON VERIFICATA** | nessuna `/dev/cu.usbmodem*` rilevata |
-| BLE reale `Lume X3` | **NON VERIFICATA** | richiede X3 acceso + scan da iPhone/Mac |
+| Boot e resa sul vetro | **PARZIALE, POSITIVA** | flash verificato; Maurizio ha osservato `lume` nel lockup superiore |
+| BLE/ANCS reale | **PARZIALE, POSITIVA** | il monitor ha ricevuto e renderizzato una notifica WhatsApp; nome advertising non ancora scandito |
 | App iOS Lume | **NON INIZIATA** | è v0.2; l'app originale non è nel repository |
 
 ## Cosa è stato implementato in v0.1
@@ -104,30 +104,39 @@ significativa perché il framebuffer X3 è già quello più grande. Warning di b
 rimasti sono ereditati (SdFat/FS macro, JPEGDEC/PNGdec macro, `NetworkClient::flush`
 deprecato), non introdotti dal cutover.
 
-## Prossima azione atomica: prova hardware v0.1
+## Prova hardware v0.1 — eseguita, completamento parziale
 
-Collegare l'X3 con cavo pogo dati 4 pin, svegliarlo e verificare che compaia
-`/dev/cu.usbmodem*`. Poi:
+Il 13/08/2026 PlatformIO ha rilevato l'X3 su `/dev/cu.usbmodem11101`:
 
-```sh
-cd xphone-os
-../.venv/bin/pio run -e lume-x3 -t upload --upload-port /dev/cu.usbmodemXXXX
-../.venv/bin/pio device monitor --baud 115200 --port /dev/cu.usbmodemXXXX
+```text
+USB VID:PID=303A:1001
+ESP32-C3 revision v0.4
+MAC d4:05:92:91:72:3c
+flash auto-rilevata: 16 MB
 ```
 
-Checklist di accettazione; registrare risultato e output qui:
+Upload eseguito con `pio run -e lume-x3 -t upload`: 2.538.688 B scritti,
+**hash verificato da esptool**, hard reset completato, `SUCCESS` in 37,66 s.
+Il monitor, aperto dopo il boot, ha osservato loop stabile, refresh FAST/PARTIAL,
+BLE connesso e una notifica WhatsApp completa via ANCS. Maurizio ha confermato
+visivamente che il lockup superiore mostra `lume` al posto di `Flowe`.
 
-- [ ] seriale contiene `[lume] boot: Xteink X3 confirmed` e non contiene il FATAL;
-- [ ] splash mostra mark + `lume`, senza artefatti o tagli;
-- [ ] launcher mostra il lockup Lume e i sei tile;
+Checklist di accettazione:
+
+- [x] immagine Lume caricata e hash del flash verificato;
+- [x] firmware vivo sul pannello; launcher mostra il lockup `lume`;
+- [x] BLE/ANCS operativo: notifica WhatsApp ricevuta, attributi risolti e render eseguito;
+- [ ] catturare un boot completo con `[lume] boot: Xteink X3 confirmed` (il monitor è partito dopo il boot);
+- [ ] verificare splash/mark senza artefatti o tagli;
 - [ ] Settings mostra `Lume 0.1.0-dev (X3)`;
 - [ ] About mostra `About Lume` e pannello `xteink_x3` 528×792 logici;
 - [ ] sleep senza priorità mostra `lume`; dormant priorities mostra `lume` nel footer;
-- [ ] scan BLE vede `Lume X3` e l'app upstream può ancora connettersi via UUID;
+- [ ] scan Bluetooth vede il nome advertising `Lume X3`;
 - [ ] reader apre un EPUB già presente e gira almeno una pagina;
 - [ ] riavvio e wake non perdono settings/posizione (namespace NVS preservato).
 
-Non pubblicare una release né marcare v0.1 completa prima di questa checklist.
+Non pubblicare ancora la release: il flash è riuscito, ma la checklist delle
+schermate e della persistenza va completata.
 
 ## Dopo la prova hardware
 

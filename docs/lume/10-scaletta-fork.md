@@ -27,7 +27,7 @@ in giorni; solo complessità e prova di funzionamento.
 ---
 
 ## v0.1 — Baseline "è mio e compila"
-**Stato locale:** implementato e compilato; prova su hardware ancora da eseguire.
+**Stato locale:** implementato, compilato e flashato; launcher Lume e ANCS verificati, checklist hardware restante in `CURRENT-STATE.md`.
 
 
 1. Fork privato + `upstream` remoto; branch `main` tuo. Upstream pubblica solo commit
