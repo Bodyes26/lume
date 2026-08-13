@@ -4,3 +4,8 @@
 *.map
 .DS_Store
 .venv/
+ios/.build/
+ios/.build-device/
+ios/.build-simulator/
+ios/.derivedData/
+**/xcuserdata/

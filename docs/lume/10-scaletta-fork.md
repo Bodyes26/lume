@@ -27,7 +27,7 @@ in giorni; solo complessità e prova di funzionamento.
 ---
 
 ## v0.1 — Baseline "è mio e compila"
-**Stato locale:** implementato, compilato e flashato; launcher Lume e ANCS verificati, checklist hardware restante in `CURRENT-STATE.md`.
+**Stato:** completata e accettata su X3 da Maurizio il 13/08/2026.
 
 
 1. Fork privato + `upstream` remoto; branch `main` tuo. Upstream pubblica solo commit
@@ -52,23 +52,26 @@ Spec: [03-protocollo-ble.md](03-protocollo-ble.md). Con **account Apple gratuito
 firma valida 7 giorni, `EventKit` e `bluetooth-central` funzionano, Screen Time no.
 
 App:
-1. `CBCentralManager`, scan **per `SERVICE_UUID`** (`6E400001-…CA9E`), connessione,
-   bonding (accetti il popup: il device inizia la security), subscribe alla Action
-   Notify **prima** di scrivere.
-2. `Info.plist`: `NSBluetoothAlwaysUsageDescription`, `UIBackgroundModes = [bluetooth-central]`,
-   `CBCentralManagerOptionRestoreIdentifierKey` per la state restoration.
-3. `time.sync` subito dopo la connessione (`day` = `yyyymmdd`, `minutesIntoDay`).
-4. Priorities: risposta a `priorities.sync.request` con `priorities.snapshot`
-   (≤10 item, ≤512 B per write, split `part`/`parts`), consumo di `priority.toggle`.
+1. [x] `CBCentralManager`, scan **per `SERVICE_UUID`** (`6E400001-…CA9E`),
+   connessione/restoration e subscribe Action Notify prima di scrivere.
+2. [x] `Info.plist`: `NSBluetoothAlwaysUsageDescription`,
+   `UIBackgroundModes = [bluetooth-central]` e restore identifier.
+3. [x] `time.sync` subito dopo la connessione (`day` = `yyyymmdd`,
+   `minutesIntoDay`).
+4. [x] Priorities locale + `priorities.snapshot` (≤10 item, ≤512 B,
+   split `part`/`parts`) + consumo di `priority.toggle`.
+5. [ ] Prova end-to-end su iPhone/X3: serve Xcode compatibile con iOS 27 e
+   provisioning profile per `com.maurizio.lume`.
 
-Firmware (fix mirati, complessità bassa):
-* Gate delle card sul link cifrato (`WRITE_ENC` + `isEncrypted()`): 2 punti, nessun
-  costo d'uso — il tuo iPhone è già bonded, cambiare telefono richiede solo un nuovo
-  pairing, non un reset.
-* ANCS `requestResync()` oggi è un no-op (`pumpResync()` non esiste): implementarlo.
-* Timeout su `priority.toggle` (oggi "Updating priority…" resta per sempre).
+Firmware:
+* [x] Gate GATT cifrato per Card Write e Action Read/Notify.
+* [x] Resync ANCS sticky durante reconnect/discovery, con retry di subscribe.
+* [x] Timeout app di 8 secondi sulle write, con reconnect automatico.
+* [ ] Prova hardware del firmware hardenizzato (l'X3 non era collegato durante
+  questo build).
 
-*Prova*: priorità dettate sul telefono che compaiono sul vetro e si spuntano col tasto.
+*Prova di accettazione*: priorità create sul telefono che compaiono sul vetro e
+si spuntano col tasto, poi reconnect senza riavviare l'app.
 
 ## v0.3 — Italiano completo con switcher
 

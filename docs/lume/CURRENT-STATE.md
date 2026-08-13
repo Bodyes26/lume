@@ -1,9 +1,10 @@
 # Lume — stato operativo e handoff
 
 **Aggiornato:** 13 agosto 2026  
-**Versione in sviluppo:** `0.1.0-dev`  
+**Versione firmware:** `0.1.0-dev`  
+**Versione app iOS:** `0.2.0-dev`  
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
-**Fase:** v0.1 flashata su X3; boot/launcher e radio osservati, checklist hardware restante ancora aperta.
+**Fase:** firmware v0.1 accettato; primo vertical slice dell'app iOS v0.2 implementato e verificato in Simulator.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -15,11 +16,11 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Documentazione persistente | **VERIFICATA** | 14 capitoli + START/HANDOFF dentro `docs/lume/` |
 | Toolchain locale | **VERIFICATA** | Python 3.11, `.venv`, PlatformIO Core 6.1.19 |
 | Build upstream di riferimento | **VERIFICATA** | `xteink` prima delle modifiche: SUCCESS; flash 2.532.155 B, RAM 145.004 B |
-| Build Lume X3-only | **VERIFICATA** | `lume-x3`: SUCCESS; flash 2.526.151 B, RAM 144.988 B |
+| Build Lume X3-only | **VERIFICATA** | ultimo build: SUCCESS; flash 2.526.395 B, RAM 144.988 B |
 | Identità a compile time | **VERIFICATA** | stringhe, UUID preservati, asset/env/release compilano |
-| Boot e resa sul vetro | **PARZIALE, POSITIVA** | flash verificato; Maurizio ha osservato `lume` nel lockup superiore |
-| BLE/ANCS reale | **VERIFICATA** | nome advertising `Lume X3` confermato da Maurizio; notifica WhatsApp ricevuta e renderizzata |
-| App iOS Lume | **NON INIZIATA** | è v0.2; l'app originale non è nel repository |
+| Boot e resa sul vetro | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo |
+| BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
+| App iOS Lume v0.2 | **PARZIALMENTE VERIFICATA** | build iPhone unsigned SUCCESS; 4 contract test PASS; UI Simulator ispezionata. Installazione reale richiede account/profilo firma e Xcode con supporto iOS 27 |
 
 ## Cosa è stato implementato in v0.1
 
@@ -69,8 +70,53 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 * `.github/workflows/firmware-release.yml` compila solo `lume-x3` e produce:
   `lume-x3.bin`, `lume-x3-<version>.bin`, `update.bin`, `lume-x3.zip`, checksum e
   `latest.json` con la sola chiave `x3`.
-* `README.md` e `xphone-os/README.md` distinguono Lume dall'upstream, dichiarano che
-  l'app iOS non esiste ancora e riportano i comandi reali.
+* `README.md` e `xphone-os/README.md` distinguono Lume dall'upstream e riportano
+  i comandi reali; il README principale documenta anche il vertical slice iOS.
+
+## App iOS v0.2 — vertical slice implementato
+
+Il sorgente nativo SwiftUI è in `ios/` e il progetto Xcode è rigenerabile da
+`ios/project.yml` con XcodeGen. Bundle id `com.maurizio.lume`, deployment target
+iOS 17, stato e testi in italiano.
+
+Comportamento implementato:
+
+* shell visuale Lume con mark geometrico, palette carta/inchiostro e layout
+  Priorità verificato su iPhone 17 Pro Simulator;
+* archivio locale persistente di massimo dieci priorità; aggiunta, modifica,
+  completamento, eliminazione e riordino;
+* discovery per UUID del servizio, reconnect dell'ultimo peripheral e
+  CoreBluetooth state restoration;
+* subscribe ad Action Notify, `time.sync` automatico e snapshot
+  `priorities.snapshot` multipart entro MTU/limite firmware;
+* gestione `priority.toggle` e `priorities.sync.request`;
+* coda GATT sequenziale con write-with-response e recovery dopo 8 secondi;
+* 4 contract test host per tempo locale, schema snapshot, split ordinato e
+  decode toggle.
+
+Hardening firmware v0.2 già applicato e compilato:
+
+* Card Write richiede link cifrato; Action Read/Notify dichiara accesso cifrato;
+* la richiesta di resync ANCS resta pendente durante reconnect/discovery e
+  ritenta dopo errori di subscribe, senza lasciare il CCCD spento.
+
+Verifica osservata il 13/08/2026:
+
+```text
+xcodebuild iPhoneOS unsigned: BUILD SUCCEEDED
+swift test: 4 test, 0 failure
+Simulator iPhone 17 Pro: install, launch e screenshot riusciti
+firmware lume-x3: SUCCESS; RAM 144.988 B; flash 2.526.395 B
+firmware.bin: 2.538.928 B
+SHA-256: fc4b4bdbc2990a28c1735ca47050be93c8246e11387af1341c0d9fc4fd173378
+```
+
+Blocco esterno residuo: il Mac possiede il certificato Apple Development
+`PRF667R7JB`, ma Xcode non ha un account registrato né un provisioning profile
+per `com.maurizio.lume`. Dopo aver aggiunto l'account in Xcode, la build firmata
+può essere installata sull'iPhone 16 Pro collegato; il telefono usa iOS 27.0,
+quindi per installazione/debug serve inoltre una versione Xcode che supporti
+iOS 27.
 
 ## Evidenza di build
 
@@ -104,7 +150,7 @@ significativa perché il framebuffer X3 è già quello più grande. Warning di b
 rimasti sono ereditati (SdFat/FS macro, JPEGDEC/PNGdec macro, `NetworkClient::flush`
 deprecato), non introdotti dal cutover.
 
-## Prova hardware v0.1 — eseguita, completamento parziale
+## Prova hardware v0.1 — completata
 
 Il 13/08/2026 PlatformIO ha rilevato l'X3 su `/dev/cu.usbmodem11101`:
 
@@ -121,33 +167,37 @@ Il monitor, aperto dopo il boot, ha osservato loop stabile, refresh FAST/PARTIAL
 BLE connesso e una notifica WhatsApp completa via ANCS. Maurizio ha confermato
 visivamente che il lockup superiore mostra `lume` al posto di `Flowe`.
 
-Checklist di accettazione:
+Checklist di accettazione hardware — completata da Maurizio:
 
 - [x] immagine Lume caricata e hash del flash verificato;
-- [x] firmware vivo sul pannello; launcher mostra il lockup `lume`;
+- [x] boot, splash e launcher funzionano sul pannello X3;
 - [x] BLE/ANCS operativo: notifica WhatsApp ricevuta, attributi risolti e render eseguito;
-- [ ] catturare un boot completo con `[lume] boot: Xteink X3 confirmed` (il monitor è partito dopo il boot);
-- [ ] verificare splash/mark senza artefatti o tagli;
-- [ ] Settings mostra `Lume 0.1.0-dev (X3)`;
-- [ ] About mostra `About Lume` e pannello `xteink_x3` 528×792 logici;
-- [ ] sleep senza priorità mostra `lume`; dormant priorities mostra `lume` nel footer;
-- [x] scan Bluetooth vede il nome advertising `Lume X3` (confermato da Maurizio);
-- [ ] reader apre un EPUB già presente e gira almeno una pagina;
-- [ ] riavvio e wake non perdono settings/posizione (namespace NVS preservato).
+- [x] Settings mostra identità/versione Lume;
+- [x] About e diagnostica pannello funzionano;
+- [x] sleep e dormant frame funzionano;
+- [x] scan Bluetooth vede il nome advertising `Lume X3`;
+- [x] reader apre e usa gli EPUB;
+- [x] riavvio/wake e persistenza si comportano correttamente nei test manuali.
 
-Non pubblicare ancora la release: il flash è riuscito, ma la checklist delle
-schermate e della persistenza va completata.
+**Esito:** Maurizio ha confermato il 13/08/2026 che, dopo un periodo di prova
+manuale, «funziona tutto». v0.1 è accettata; nessuna release pubblica è stata
+creata.
 
-## Dopo la prova hardware
+## Prossime azioni
 
-1. Creare il repository GitHub personale (nome consigliato `lume`) e aggiungerlo:
-   `git remote add origin <URL>`; mantenere `upstream` fetch-only.
-2. Fare il primo tag soltanto dopo hardware pass; per sviluppo usare `0.1.0-dev`, per
-   release `fw-v0.1.0` e versione sorgente `0.1.0`.
-3. Iniziare v0.2 dall'app iOS minima: CoreBluetooth, bonding, subscribe Action Notify,
-   `time.sync`, Priorities snapshot/toggle. Specifica: `03-protocollo-ble.md`.
-4. Nello stesso v0.2 applicare il gate BLE cifrato e i due fix già decisi
-   (ANCS resync e timeout toggle). Non anticipare Screen Time: richiede ADP a pagamento.
+1. Installare Xcode con supporto iOS 27 e aggiungere l'Apple Account di Maurizio
+   in Xcode Settings > Accounts; lasciare `Automatically manage signing` per il
+   team `PRF667R7JB`.
+2. Installare Lume sull'iPhone 16 Pro, collegarsi all'X3 e verificare end-to-end:
+   bonding, time sync, snapshot iniziale, toggle dall'X3, reconnect e timeout.
+3. Ricollegare l'X3 via pogo dati, flashare il firmware hardenizzato e verificare
+   che l'app upstream non possa scrivere prima della cifratura ma continui a
+   funzionare dopo il bonding; aprire Notifications dopo un reconnect per il
+   resync sticky.
+4. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
+   `upstream` fetch-only.
+5. Dopo l'accettazione del vertical slice, implementare Today/EventKit. Non
+   anticipare Screen Time: richiede Apple Developer Program a pagamento.
 
 ## Decisioni da non riaprire senza nuova evidenza
 

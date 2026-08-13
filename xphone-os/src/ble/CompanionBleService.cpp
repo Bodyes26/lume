@@ -224,7 +224,9 @@ void CompanionBleService::begin() {
   }
 
   cardCharacteristic = service->createCharacteristic(
-      CompanionProtocol::CARD_WRITE_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+      CompanionProtocol::CARD_WRITE_UUID,
+      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR |
+          BLECharacteristic::PROPERTY_WRITE_ENC);
   static CompanionCardWriteCallbacks cardWriteCallbacks(*this);
   if (!cardCharacteristic) {
     LOG_ERR("X4CMP", "card characteristic setup failed");
@@ -234,7 +236,8 @@ void CompanionBleService::begin() {
 
   actionCharacteristic =
       service->createCharacteristic(CompanionProtocol::ACTION_NOTIFY_UUID,
-                                    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+                                    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY |
+                                        BLECharacteristic::PROPERTY_READ_ENC);
   if (!actionCharacteristic) {
     LOG_ERR("X4CMP", "action characteristic setup failed");
     return;

@@ -5,10 +5,11 @@ Lume is a personal, Xteink X3-only fork of
 ESP32-C3 firmware architecture and companion protocol while moving toward an
 Italian, configurable desk dashboard and a new iOS companion app.
 
-**Current state:** firmware `0.1.0-dev`; the X3-only build, Lume identity and
-release pipeline are in place. The Lume iOS app is not implemented yet, so
-phone-driven cards still require a protocol-compatible companion. The EPUB
-reader works independently from the phone.
+**Current state:** firmware `0.1.0-dev` is accepted on an X3; the native SwiftUI
+Lume companion now implements the first v0.2 vertical slice: CoreBluetooth
+discovery/restoration, time sync, and persistent Priorities snapshot/toggle.
+Today, Workout, Block, reader transfer and Screen Time control remain on the
+roadmap. The EPUB reader works independently from the phone.
 
 Development decisions, verified architecture notes and the cross-session
 handoff start at [`docs/lume/START-HERE.md`](docs/lume/START-HERE.md).
@@ -67,6 +68,29 @@ The complete implementer-facing specification for the new iOS app, including
 UUIDs, payload schemas, limits, ordering and reconnect behavior, is
 [`docs/lume/03-protocollo-ble.md`](docs/lume/03-protocollo-ble.md).
 The reader itself needs no companion app.
+
+## iOS companion
+
+The native app lives in `ios/`. It targets iOS 17+, stores up to ten priorities
+locally, reconnects to the last X3 through CoreBluetooth state restoration, and
+serializes every GATT write with a response and an 8-second recovery timeout.
+The firmware service UUID remains upstream-compatible; the user-visible device
+name is `Lume X3`.
+
+Generate, build and test it with:
+
+```sh
+cd ios
+xcodegen generate
+xcodebuild build -project Lume.xcodeproj -target Lume \
+  -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+swift test
+```
+
+Installing on an iPhone requires an Apple account selected for team
+`PRF667R7JB` in Xcode and an automatically generated development provisioning
+profile for `com.maurizio.lume`. The Simulator validates the visual shell but
+cannot exercise CoreBluetooth.
 
 ## Performance
 

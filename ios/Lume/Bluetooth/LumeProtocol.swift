@@ -1,0 +1,181 @@
+import Foundation
+
+struct LumeDeviceAction: Decodable, Equatable, Sendable {
+    let schemaVersion: Int
+    let type: String
+    let id: String?
+    let done: Bool?
+    let sequence: UInt32?
+}
+
+enum LumeProtocolError: LocalizedError, Equatable {
+    case payloadLimitTooSmall(Int)
+    case itemTooLarge(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .payloadLimitTooSmall(let bytes):
+            return "Il collegamento accetta solo \(bytes) byte per messaggio."
+        case .itemTooLarge(let title):
+            return "“\(title)” è troppo lunga per essere inviata all’X3."
+        }
+    }
+}
+
+enum LumeProtocol {
+    static let serviceUUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let cardWriteUUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let actionNotifyUUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let schemaVersion = 1
+    static let maximumCardBytes = 512
+    static let maximumPriorityItems = 10
+
+    static func makeTimeSync(date: Date = .now, calendar: Calendar = .current) throws -> Data {
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let day = (components.year ?? 0) * 10_000 + (components.month ?? 0) * 100 + (components.day ?? 0)
+        let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        return try encode(TimeSyncPayload(day: day, minutesIntoDay: minutes))
+    }
+
+    static func makePrioritySnapshots(
+        items: [PriorityItem],
+        maximumPayloadBytes: Int,
+        now: Date = .now
+    ) throws -> [Data] {
+        let byteLimit = min(maximumCardBytes, maximumPayloadBytes)
+        guard byteLimit >= 96 else { throw LumeProtocolError.payloadLimitTooSmall(byteLimit) }
+
+        let safeItems = Array(items.prefix(maximumPriorityItems)).map(SafePriority.init)
+        let identifier = "priorities-sync-\(Int(now.timeIntervalSince1970))"
+        let active = safeItems.lazy.filter { !$0.done }.count
+        let completed = safeItems.count - active
+        let summary = "\(active) da fare / \(completed) completate"
+
+        if safeItems.isEmpty {
+            let payload = try encodeSnapshot(
+                id: identifier,
+                body: summary,
+                part: 0,
+                parts: 1,
+                items: []
+            )
+            guard payload.count <= byteLimit else { throw LumeProtocolError.payloadLimitTooSmall(byteLimit) }
+            return [payload]
+        }
+
+        var groups: [[SafePriority]] = []
+        var current: [SafePriority] = []
+
+        for item in safeItems {
+            let candidate = current + [item]
+            // 9/10 is the worst field-width case for the protocol's ten-item cap.
+            let probe = try encodeSnapshot(id: identifier, body: summary, part: 9, parts: 10, items: candidate)
+            if probe.count <= byteLimit {
+                current = candidate
+                continue
+            }
+
+            guard !current.isEmpty else { throw LumeProtocolError.itemTooLarge(item.title) }
+            groups.append(current)
+            current = [item]
+
+            let single = try encodeSnapshot(id: identifier, body: summary, part: 9, parts: 10, items: current)
+            guard single.count <= byteLimit else { throw LumeProtocolError.itemTooLarge(item.title) }
+        }
+        if !current.isEmpty { groups.append(current) }
+
+        let partCount = groups.count
+        return try groups.enumerated().map { index, group in
+            let data = try encodeSnapshot(
+                id: identifier,
+                body: summary,
+                part: index,
+                parts: partCount,
+                items: group
+            )
+            guard data.count <= byteLimit else { throw LumeProtocolError.itemTooLarge(group[0].title) }
+            return data
+        }
+    }
+
+    static func decodeAction(_ data: Data) throws -> LumeDeviceAction {
+        try JSONDecoder().decode(LumeDeviceAction.self, from: data)
+    }
+
+    private static func encode<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(value)
+    }
+
+    private static func encodeSnapshot(
+        id: String,
+        body: String,
+        part: Int,
+        parts: Int,
+        items: [SafePriority]
+    ) throws -> Data {
+        try encode(PrioritySnapshotPayload(
+            id: id,
+            body: body,
+            part: part,
+            parts: parts,
+            priorityItems: items
+        ))
+    }
+}
+
+private struct TimeSyncPayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "time.sync"
+    let day: Int
+    let minutesIntoDay: Int
+}
+
+private struct PrioritySnapshotPayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "card"
+    let kind = "priorities.snapshot"
+    let id: String
+    let title = "Priorità"
+    let body: String
+    let part: Int
+    let parts: Int
+    let priorityItems: [SafePriority]
+}
+
+private struct SafePriority: Encodable {
+    let id: String
+    let title: String
+    let note: String
+    let done: Bool
+
+    init(_ item: PriorityItem) {
+        id = item.id.prefixUTF8(maxBytes: 64)
+        title = item.title.prefixUTF8(maxBytes: 96)
+        note = item.note.prefixUTF8(maxBytes: 120)
+        done = item.isDone
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.unkeyedContainer()
+        try values.encode(id)
+        try values.encode(title)
+        try values.encode(note)
+        try values.encode(done)
+    }
+}
+
+private extension String {
+    func prefixUTF8(maxBytes: Int) -> String {
+        guard utf8.count > maxBytes else { return self }
+        var result = ""
+        result.reserveCapacity(maxBytes)
+        for character in self {
+            let candidate = result + String(character)
+            guard candidate.utf8.count <= maxBytes else { break }
+            result = candidate
+        }
+        return result
+    }
+}

@@ -63,6 +63,7 @@ marcate `[INFERENZA]`; non trasformarle in fatti senza build o prova hardware.
 
 * `xphone-os/`: firmware PlatformIO/Arduino ESP32-C3.
 * `freeink-sdk/`: SDK hardware/display vendorizzato.
+* `ios/`: companion nativo SwiftUI, progetto XcodeGen e contract test SwiftPM.
 * `docs/lume/`: memoria tecnica e decisionale del fork; va aggiornata insieme al codice.
 * `docs/screens/`: schermate firmware upstream.
 
@@ -76,6 +77,17 @@ cd xphone-os
 ../.venv/bin/pio run -e lume-x3 -t upload
 ../.venv/bin/pio device monitor --baud 115200
 ```
+
+```sh
+cd ios
+xcodegen generate
+xcodebuild build -project Lume.xcodeproj -target Lume \
+  -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+swift test
+```
+
+Per il device reale selezionare in Xcode il team `PRF667R7JB`; l'iPhone di
+Maurizio usa iOS 27 e richiede una versione Xcode compatibile.
 
 Prima di flashare, verificare che il cavo pogo sia quello dati a 4 pin. Non usare
 comandi distruttivi sulla SD e non inizializzare il display finché il guard X3 non ha

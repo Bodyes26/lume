@@ -1,0 +1,62 @@
+name: Lume
+options:
+  bundleIdPrefix: com.maurizio
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: PRF667R7JB
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+targets:
+  Lume:
+    type: application
+    platform: iOS
+    sources:
+      - path: Lume
+        excludes:
+          - Resources/Info.plist
+          - Resources/Assets.xcassets
+    resources:
+      - path: Lume/Resources/AppIcon60@2x.png
+      - path: Lume/Resources/AppIcon60@3x.png
+    info:
+      path: Lume/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Lume
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon60
+            UIPrerenderedIcon: false
+        NSBluetoothAlwaysUsageDescription: Lume usa Bluetooth per sincronizzare priorità, agenda, libri e stato del dispositivo X3.
+        UIBackgroundModes:
+          - bluetooth-central
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSupportsIndirectInputEvents: true
+        UIRequiresFullScreen: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maurizio.lume
+        PRODUCT_NAME: Lume
+    scheme:
+      testTargets:
+        - LumeTests
+  LumeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LumeTests
+    dependencies:
+      - target: Lume
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maurizio.lume.tests

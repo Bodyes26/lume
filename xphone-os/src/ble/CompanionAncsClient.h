@@ -124,6 +124,7 @@ class CompanionAncsClient final {
   void handleDataSourceSubscribed();
   void handleNotificationSourceSubscribed();
   void handleNotificationSourceUnsubscribed();  // resync step 2: re-enable the CCCD
+  void handleNotificationSourceSubscriptionFailed();
   void handleControlPointWriteComplete(int status);  // NimBLE host callback; mutex-guarded state only
 #endif
 
@@ -225,7 +226,10 @@ class CompanionAncsClient final {
   // drop the notification until the next reconnect); a second timeout for the
   // SAME UID gives up. Cleared on link-down flush.
   uint32_t fetchRetryUid = 0;
-  // requestResync() throttle/in-flight stamp (0 = never ran). Main-loop only.
+  // Sticky user-requested replay. Guarded because subscription completion runs
+  // on nimble_host while request/pump run on the main loop.
+  bool resyncPending = false;
+  bool resyncInFlight = false;
   uint32_t lastResyncMs = 0;
   // Discovery watchdog state (main-loop-only, via maybeKickDiscovery).
   uint32_t notReadySinceMs = 0;  // 0 = timer disarmed
@@ -291,6 +295,7 @@ class CompanionAncsClient final {
   // a discovery is nominally in flight), kick startDiscovery again; capped
   // per-connection. Gated on isConnected() (reliable), NOT isEncrypted().
   void maybeKickDiscovery();
+  bool pumpResync();       // main loop only; starts a pending replay when ready
   void pumpDismiss();   // main loop only (via processQueue; runs before backfill)
   void pumpBackfill();  // main loop only (via processQueue)
   void enqueueBackfill(uint32_t uid, uint8_t categoryId, uint8_t flags, uint32_t sessionId,

@@ -1,11 +1,14 @@
-# Protocollo BLE di Flowe OS — specifica implementativa
+# Protocollo BLE di Lume — specifica implementativa
 
-Tutti i riferimenti sono al modulo firmware `xphone-os/` della repo `flowe-os`. Percorsi abbreviati: `src/…` = `xphone-os/src/…`.
-Il firmware è **GATT server (peripheral)** per il canale card/command e **GATT client** verso ANCS sull'iPhone. Non esiste codice iOS in repo: questo capitolo è l'unica specifica disponibile.
+Tutti i riferimenti sono al modulo firmware `xphone-os/`. Percorsi abbreviati:
+`src/…` = `xphone-os/src/…`. Il firmware è **GATT server (peripheral)** per il
+canale card/command e **GATT client** verso ANCS sull'iPhone. Il companion Lume
+implementato è in `ios/`.
 
-> **Delta Lume v0.1:** il device è solo X3 e si annuncia come `Lume X3`.
-> `SERVICE_UUID`, caratteristiche, schema JSON e limiti sotto sono invariati;
-> l'app deve continuare a scansionare per UUID, mai per nome.
+> **Delta Lume v0.2:** il device è solo X3 e si annuncia come `Lume X3`.
+> `SERVICE_UUID`, caratteristiche, schema JSON e limiti restano wire-compatible;
+> l'app scansiona per UUID, mai per nome. Il canale GATT richiede ora il link
+> cifrato.
 
 File sorgente rilevanti: `src/ble/CompanionProtocol.h` (UUID + limiti), `src/ble/CompanionBleService.{h,cpp}` (peripheral, parser card, comandi in uscita), `src/ble/CompanionAncsClient.{h,cpp}` (ANCS), `src/CompanionSync.{h,cpp}` (registry resync per scena), `src/NotificationStore.*`, `src/NotificationFilter.*`, store consumer `src/{PrioritiesStore,TodayStore,WorkoutStore,BlockStatusStore,ClockStore}.*`.
 
@@ -13,7 +16,7 @@ File sorgente rilevanti: `src/ble/CompanionProtocol.h` (UUID + limiti), `src/ble
 
 | Elemento | Valore | Evidenza |
 |---|---|---|
-| Local Name (Complete) | `xphone X3` (X4: `xphone X4`) — deciso a runtime dal fingerprint I2C | `src/ble/CompanionProtocol.h:25` |
+| Local Name (Complete) | `Lume X3` | `src/ble/CompanionProtocol.h:19-25` |
 | Nome: limite | scartato se vuoto o >29 caratteri | `src/ble/CompanionBleService.cpp:75-82` |
 | ADV packet | Flags `0x01` = LE General Disc + BR/EDR not supported (3 B) + **Service Solicitation 128-bit** (`0x15`) con l'UUID ANCS `7905F431-B5CE-4E99-A40F-4B1E122D00D0` (18 B) = 21 B | `:53-73`, `:250-258` |
 | SCAN RESPONSE | Complete List of 128-bit Service UUID = `SERVICE_UUID` (18 B) + Complete Local Name (11 B) = 29 B | `:260-263` |
@@ -31,7 +34,7 @@ Il radio si accende **dopo** il primo paint della launcher (`src/main.cpp:300-30
 * L'iniziativa è **del device**: alla connessione il callback arma un pump (`armSecurity`, fuse 600 ms) e il main loop chiama `ble_gap_security_initiate` (`:583-591`, `:717-756`). `rc == 0` o `BLE_HS_EALREADY` → attesa di ENC_CHANGE. Un fallimento è ritentato **una sola volta** dopo 2000 ms (`:635-645`, `:739-748`).
 * Bond persistiti nella partizione NVS di NimBLE; sopravvivono al deep sleep, che non fa teardown dello stack (`src/Sleep.cpp:356-363`).
 * ANCS è ammesso solo su link **cifrato**: la discovery parte da `onAuthenticationComplete` con `sec_state.encrypted` (`src/ble/CompanionAncsClient.cpp:778-797`) o dal watchdog (§9).
-* **Le caratteristiche del servizio companion NON richiedono encryption** (nessun permesso `*_ENC` impostato, `src/ble/CompanionBleService.cpp:226-241`): le card sono accettate anche su link non cifrato. Vedi attrito 1.
+* Lume imposta `WRITE_ENC` su Card Write e `READ_ENC` su Action Read/Notify (`src/ble/CompanionBleService.cpp:226-240`): una card non viene accettata prima della cifratura del link.
 
 ## 3. Parametri di connessione e MTU
 
@@ -45,8 +48,8 @@ Il radio si accende **dopo** il primo paint della launcher (`src/main.cpp:300-30
 | Caratteristica | UUID | Proprietà | Direzione | Payload |
 |---|---|---|---|---|
 | Service | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` | — | — | — |
-| Card Write | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` | `WRITE`, `WRITE_NR` | phone → device | JSON UTF-8, una card per write |
-| Action Notify | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` | `READ`, `NOTIFY` | device → phone | JSON UTF-8, un messaggio per notify |
+| Card Write | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` | `WRITE`, `WRITE_NR`, `WRITE_ENC` | phone → device | JSON UTF-8, una card per write |
+| Action Notify | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` | `READ`, `NOTIFY`, `READ_ENC` | device → phone | JSON UTF-8, un messaggio per notify |
 
 Fonte: `src/ble/CompanionProtocol.h:26-28`, `src/ble/CompanionBleService.cpp:226-245`. Valore iniziale leggibile della Action: `{"schemaVersion":1,"type":"ready"}` (`:245`).
 
@@ -268,8 +271,8 @@ Persistenza attraverso il sleep (`src/Sleep.cpp:69-80`, `:292-303`, `:471-493`):
 
 1. **Ruolo:** solo `CBCentralManager`. Nessun `CBPeripheralManager`: ANCS è servito dal sistema.
 2. **Background modes:** `bluetooth-central` in `UIBackgroundModes`. Riconnessione con `CBCentralManagerOptionRestoreIdentifierKey` (state restoration) e `scanForPeripherals(withServices: [6E400001-…])`; il device può stare in slow advertising 400–500 ms.
-3. **Ordine di scoperta:** connect → `discoverServices([6E400001…])` → `discoverCharacteristics` → `setNotifyValue(true)` su `6E400003` **prima** di scrivere, altrimenti le prime notify (es. `block.status` del resync) si perdono. Il pairing lo inizia il device dopo ~600 ms: non forzare letture cifrate per provocarlo.
-4. **Dimensione write:** tenere ogni card ≤ ~500 byte utili e spezzare con `part`/`parts`; usare `.withResponse` (la caratteristica supporta anche WRITE_NR) e attendere `didWriteValueFor` prima della fetta successiva.
+3. **Ordine di scoperta:** connect → bonding/cifratura avviati dal device → `discoverServices([6E400001…])` → `discoverCharacteristics` → `setNotifyValue(true)` su `6E400003` **prima** di scrivere. Le caratteristiche cifrate possono produrre `insufficientEncryption` finché il pairing non è completo: attendere il completamento e ritentare senza eliminare il bond.
+4. **Dimensione write:** tenere ogni card ≤ ~500 byte utili e spezzare con `part`/`parts`; usare `.withResponse`, attendere `didWriteValueFor` prima della fetta successiva e applicare un timeout/reconnect (Lume iOS usa 8 s).
 5. **Frequenza write:** max 4 write in volo (FIFO del firmware); il main loop gira a ~10 ms ma può essere occupato da un refresh e-ink. Spaziare le fette di almeno un intervallo di connessione (~180 ms) e non superare 4 write consecutive senza pausa.
 6. **UTF-8:** il clip lato firmware è **in byte** e non protegge i confini UTF-8 nelle card (a differenza di ANCS). Pre-troncare lato iOS ai cap della tabella §5 contando byte, ed evitare emoji nei campi card (il font non li disegna).
 7. **Handler obbligatori:** `priorities.sync.request`, `today.sync.request`, `workout.sync.request`, `block.status`, `priority.toggle`, `workout.set`, `block.start|break|stop`. Ignorare in modo innocuo i tipi ignoti (`card.action`, `transfer.status`, `reader.shelf`, `notif.apps`) se non si implementano quelle funzioni.
@@ -279,14 +282,14 @@ Persistenza attraverso il sleep (`src/Sleep.cpp:69-80`, `:292-303`, `:471-493`):
 
 ## Cose da sistemare / attriti
 
-1. **Card accettate su link non cifrato — scrittura di credenziali Wi-Fi in chiaro.** Le caratteristiche non hanno permessi di encryption (`src/ble/CompanionBleService.cpp:226-241`, nessun `PERMISSION_*_ENC` in tutto `src/`) e `applyCardPayload` non controlla `isEncrypted()`; un central qualsiasi può inviare `transfer.wifi` (salvataggio SSID/password in NVS, `:834-843`), `transfer.start` (spegne BLE fino al reboot) e `notif.filter`. **Gravità: alta.** Fix: dichiarare la Card Write come `WRITE_ENC|WRITE_AUTHEN` e gatare `applyCardPayload` su `isEncrypted()`.
+1. **[RISOLTO IN LUME v0.2] Card su link non cifrato.** Card Write dichiara `WRITE_ENC`; Action Read/Notify dichiara `READ_ENC` (`src/ble/CompanionBleService.cpp:226-240`). Resta da provare su hardware con un central non bonded.
 2. **Percorso “mail” morto.** `mailItems`/`mailSource`/`mailSync` sono parsati in `CompanionCardState` (8 × `CompanionMailItem`, 6 `std::string` ciascuno) ma nessun consumer li legge (`src/ble/CompanionBleService.cpp:910-931`; ricerca in `src/`: nessun altro riferimento). Costa allocazioni heap nello slot di parse da ~3,6 KB su un device con 320 KB. **Gravità: media.** Fix: eliminare struct, cap e blocco di parsing.
 3. **`actions[]` + `card.action` codice morto.** `sendAction()` non ha chiamanti (`:1031-1066`) e l'array `actions` esiste solo per lui (`:880-887`, `src/ble/CompanionProtocol.h:47-50`). **Gravità: bassa.** Fix: rimuovere entrambi, oppure agganciare le action alle soft-key se serve un canale generico.
 4. **`part`/`parts` onorati solo da Priorities.** `TodayStore::updateFromCard` e `WorkoutStore::updateFromCard` sovrascrivono lo stato a ogni fetta (`src/TodayStore.cpp:20-37`, `src/WorkoutStore.cpp:17-49`): una snapshot Today/Workout multi-part lascia sul vetro solo l'ultima fetta. **Gravità: media.** Fix: portare lo staging di `PrioritiesStore` in una utility condivisa, o rifiutare `parts > 1` per quei tipi.
 5. **La FIFO da 4 slot perde silenziosamente le fette di una snapshot multi-part.** A FIFO piena si scarta il payload più vecchio (`src/ble/CompanionBleService.cpp:690-695`) e `PrioritiesStore` continua a impilare da `_stageCount`, committando una lista sbagliata senza segnalare nulla (`src/PrioritiesStore.cpp:26-43`). **Gravità: media.** Fix: validare la continuità di `part` (contatore atteso) e invalidare lo staging se una fetta manca.
 6. **Nessun ACK/errore verso il telefono.** Payload rifiutato, JSON malformato e OOM del parser aggiornano solo una stringa locale (`:680-683`, `:766-771`, `:846-849`). L'app iOS non può distinguere “card applicata” da “card persa”. **Gravità: media.** Fix: notify `card.ack {id, part, ok, reason}` sulla Action characteristic.
 7. **Notify che si sovrascrivono.** Ogni `send*` fa `setValue` + `notify` senza coda né conferma; due comandi nello stesso tick si clobberano — problema noto e aggirato a mano serializzando le richieste pre-sleep (`src/Sleep.cpp:337-341`, `:1152-1178`). **Gravità: media.** Fix: piccola coda TX drenata su completamento notify.
-8. **`requestResync()` sticky documentato ma non implementato.** L'header promette che una richiesta a link giù resta armata e viene lanciata da `pumpResync()` (`src/ble/CompanionAncsClient.h:55-61`), ma `pumpResync` non esiste in tutto `src/` e `requestResync()` ritorna semplicemente `false` (`.cpp:597-601`): aprire Notifications durante la riconnessione post-wake non produce alcun resync. **Gravità: media.** Fix: implementare il latch armato + pump in `processQueue()`.
+8. **[RISOLTO IN LUME v0.2] Resync ANCS sticky.** `requestResync()` arma `resyncPending`; `pumpResync()` parte da `processQueue()` quando ANCS/link cifrato sono pronti, serializza CCCD off→on e ri-arma la richiesta se la subscribe fallisce (`src/ble/CompanionAncsClient.cpp`).
 9. **Hint di intervallo di connessione probabilmente non trasmesso.** `setMinPreferred/setMaxPreferred` (`:269-270`) alimentano la ricostruzione dei dati di advertising, che secondo il commento a `:304-312` viene **saltata** perché sono impostati adv e scan-response custom → l'AD Slave Connection Interval Range non finisce in aria. [INFERENZA: dedotta dal commento nel codice, framework non verificato in repo.] **Gravità: bassa.** Fix: inserire l'AD a mano in `BLEAdvertisementData` o rimuovere le due chiamate ingannevoli.
 10. **Clip in byte sui campi card, senza protezione UTF-8.** `clippedString` taglia a metà sequenza multibyte (`:84-91`), mentre il percorso ANCS usa `clipUtf8` (`src/ble/CompanionAncsClient.cpp:178-199`): un titolo di priorità con emoji al confine dei 96 byte diventa mojibake. **Gravità: media.** Fix: riusare `clipUtf8` anche nel parser card.
 11. **Blocklist notifiche: collisione sui bundle id lunghi.** Confronto su 32 byte con clip a 31 caratteri (`src/NotificationFilter.cpp:32-39`): due app che condividono i primi 31 caratteri di bundle id vengono bloccate insieme. **Gravità: bassa.** Fix: confrontare l'hash del bundle completo o allargare il campo.

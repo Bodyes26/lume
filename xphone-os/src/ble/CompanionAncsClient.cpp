@@ -470,6 +470,7 @@ int notificationSourceSubscribeCallback(uint16_t, const ble_gatt_error* error, b
   }
   LOG_ERR("ANCS", "Notification Source subscribe failed status=%d", error->status);
   COMPANION_BLE.updateStatus("ANCS notif subscribe failed");
+  client->handleNotificationSourceSubscriptionFailed();
   return error->status;
 }
 
@@ -594,15 +595,41 @@ bool CompanionAncsClient::requestResync() {
 #if defined(CONFIG_NIMBLE_ENABLED)
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
-  const bool ready = ancsReady && connHandle != NO_CONN_HANDLE;
+  resyncPending = true;
+  xSemaphoreGive(stateMutex);
+  return pumpResync();
+#else
+  return false;
+#endif
+}
+
+bool CompanionAncsClient::pumpResync() {
+#if defined(CONFIG_NIMBLE_ENABLED)
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  const uint32_t now = millis();
+  const bool throttled = lastResyncMs != 0 && now - lastResyncMs < kResyncThrottleMs;
+  if (resyncPending && throttled) resyncPending = false;
+  const bool ready = resyncPending && !resyncInFlight && ancsReady && connHandle != NO_CONN_HANDLE;
   const uint16_t handle = connHandle;
   const uint16_t valueHandle = notificationSourceHandle;
+  if (ready && valueHandle != 0) {
+    resyncPending = false;
+    resyncInFlight = true;
+    lastResyncMs = now;
+  }
   xSemaphoreGive(stateMutex);
-  if (!ready || valueHandle == 0 || !COMPANION_BLE.isEncrypted()) return false;
 
-  const uint32_t now = millis();
-  if (lastResyncMs != 0 && now - lastResyncMs < kResyncThrottleMs) return true;  // one already in flight/fresh
-  lastResyncMs = now;
+  if (!ready || valueHandle == 0 || !COMPANION_BLE.isEncrypted()) {
+    if (ready) {
+      xSemaphoreTake(stateMutex, portMAX_DELAY);
+      resyncPending = true;
+      resyncInFlight = false;
+      lastResyncMs = 0;
+      xSemaphoreGive(stateMutex);
+    }
+    return false;
+  }
 
   // Step 1: CCCD off. Step 2 (re-enable) runs from the write-complete
   // callback so the two writes can't reorder on the controller.
@@ -611,7 +638,11 @@ bool CompanionAncsClient::requestResync() {
                                       notificationSourceUnsubscribeCallback, this);
   if (rc != 0) {
     LOG_ERR("ANCS", "Notification Source resync CCCD write rc=%d", rc);
-    lastResyncMs = 0;  // failed before it started — the next open may retry at once
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    resyncPending = true;
+    resyncInFlight = false;
+    lastResyncMs = 0;
+    xSemaphoreGive(stateMutex);
     return false;
   }
   LOG_INF("ANCS", "Resync: re-subscribing Notification Source for a fresh replay");
@@ -676,6 +707,7 @@ void CompanionAncsClient::dismissNotification(uint32_t uid, uint8_t categoryId, 
 void CompanionAncsClient::processQueue() {
 #if defined(CONFIG_NIMBLE_ENABLED)
   maybeKickDiscovery();  // M5: self-heal missed/failed discovery on wake re-bonds
+  pumpResync();         // sticky open-triggered replay once ANCS is ready
   // Drain the Notification Source burst FIRST so every replayed UID is enqueued
   // into the backfill ring before we issue the first fetch, then drain the
   // (serialized) Data Source fragments. Both are drained fully per tick.
@@ -886,6 +918,7 @@ void CompanionAncsClient::handleNotificationSourceSubscribed() {
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   ancsReady = true;
+  resyncInFlight = false;
   // M2.1b lever 2: BOTH CCCDs are now written (Data Source first, this one
   // second), so ANCS setup is complete — arm the main-loop conn-param
   // renegotiation. The 1 s fuse lets any in-flight GATT traffic settle, and
@@ -896,6 +929,17 @@ void CompanionAncsClient::handleNotificationSourceSubscribed() {
   xSemaphoreGive(stateMutex);
   LOG_INF("ANCS", "ANCS subscribed");
   setStatus("ANCS subscribed; send notification");
+}
+
+void CompanionAncsClient::handleNotificationSourceSubscriptionFailed() {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  if (resyncInFlight) {
+    resyncPending = true;
+    lastResyncMs = 0;
+  }
+  resyncInFlight = false;
+  xSemaphoreGive(stateMutex);
 }
 
 // Main loop only (via processQueue). Renegotiates the connection from the
