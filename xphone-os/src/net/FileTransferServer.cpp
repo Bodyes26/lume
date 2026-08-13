@@ -143,7 +143,7 @@ void FileTransferServer::handleRoot() {
   _requestCount++;
   char body[160];
   snprintf(body, sizeof(body),
-           "xphone-os file transfer\nversion: %s\nip: %s\nUse the Flowe app to sync books.\n", XPHONE_VERSION,
+           "Lume file transfer\nversion: %s\nip: %s\nUse the Lume app to sync books.\n", XPHONE_VERSION,
            WiFi.localIP().toString().c_str());
   _server->send(200, "text/plain", body);
 }
@@ -151,10 +151,7 @@ void FileTransferServer::handleRoot() {
 void FileTransferServer::handleStatus() {
   _requestCount++;
   JsonDocument doc;
-  {
-    extern bool gDeviceIsX3;  // DeviceKind.h; set at boot
-    doc["device"] = gDeviceIsX3 ? "X3" : "X4";
-  }
+  doc["device"] = "X3";
   doc["version"] = XPHONE_VERSION;
   doc["mode"] = "STA";
   doc["ip"] = WiFi.localIP().toString();

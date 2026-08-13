@@ -385,7 +385,7 @@ bool PrioritiesScene::renderDormant(Gfx& gfx) {
   // position as the plain sleep screen's hint). During an active block the
   // stamp becomes a padlock + "Block active until <time>" (falling back to a
   // minutes-left line when the phone omits the end-time label); otherwise it
-  // stays the calm crescent + "xphone" wordmark.
+  // stays the calm crescent + "lume" wordmark.
   // Footer stack (centered): calendar line, block line beneath it, wake hint
   // last. Either line slides into the lower slot when the other is absent.
   int slotY = h - 108;
@@ -395,7 +395,7 @@ bool PrioritiesScene::renderDormant(Gfx& gfx) {
   if (!blockDrawn && !calDrawn) {
     // Nothing to say: the calm crescent + wordmark.
     const int gap = 12;
-    const char* kWordmark = "xphone";
+    const char* kWordmark = "lume";
     const int moonD = 22;
     const int gx = cx - (moonD + gap + gfx.textWidth(kFontBold, kWordmark)) / 2;
     drawMoon(gfx, gx, h - 108 + (gfx.lineHeight(kFontBold) - moonD) / 2, moonD);

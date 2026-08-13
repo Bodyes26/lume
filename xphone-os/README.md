@@ -1,21 +1,19 @@
-# xphone-os — a focus device for the Xteink X3
+# Lume firmware module (`xphone-os`)
 
-> **Hardware status:** developed and hardware-tested on the **Xteink X3**.
-> The X4 env (`pio run -e x4`) compiles — same ESP32-C3, different panel
-> (SSD1677 800×480) and battery path — but is not validated on hardware.
+> **Canonical fork state:** read [`../docs/lume/START-HERE.md`](../docs/lume/START-HERE.md)
+> and [`../docs/lume/CURRENT-STATE.md`](../docs/lume/CURRENT-STATE.md). The
+> detailed historical notes below describe the inherited upstream architecture;
+> where they conflict, the Lume handoff wins.
 
-> For project history/architecture see docs/xphone-os-m0-m3-handoff.md
-> (M0–M3 handoff). This README's "Current state" reflects work past M3.
+Lume targets the **Xteink X3 only** (ESP32-C3, UC8253 792×528). The sole
+PlatformIO environment is `lume-x3`; a pre-display I²C fingerprint guard halts
+on non-X3 hardware. The reader and file-transfer server derive from CrossPoint
+(MIT), and hardware/display support comes from the vendored FreeInk SDK.
 
-Purpose-built companion OS for Xteink e-ink devices (ESP32-C3). A
-distraction-blocking *focus* device driven by a paired iPhone — NOT an email/
-messaging client. Built with CrossPoint Reader as the reference implementation
-(reader engine and file transfer server ported from it, MIT), consuming the
-vendored FreeInk SDK (`../freeink-sdk`) via symlink lib_deps.
+## Current Lume state (2026-08-13)
 
-## Current state (2026-07-15)
-
-Branch `codex/x4-ancs-inbox`. Flashes over USB (4-pin data cable) or SD card.
+Firmware `0.1.0-dev`: X3-only build, `Lume X3` BLE identity, Lume on-glass
+wordmarks and X3-only release assets. The iOS app remains to be implemented.
 
 **Product — six focus apps, 3×2 launcher:**
 * **Block** — triggers iOS Screen Time shields via the companion BLE protocol;
@@ -52,15 +50,14 @@ open), retry ≤3, ANCS backfill ≤20; a small sync dot sits left of the batter
 while syncing. Per-scene dirty scoping means an unrelated card never repaints
 the current scene.
 
-**Sizes (x3):** ~96.5 KB RAM (29%) / ~837 KB flash (12.8%). vs CrossPoint
-109 KB / 5.35 MB.
+**Measured clean-build size (`lume-x3`):** 144,988 B static RAM (44.2% of
+327,680 B) and 2,526,151 B flash (38.5% of the 6.5 MB app partition).
 
 ### Dev workflow
-* Build: `pio run -e x3` (default) or `-e x4`. Both must pass.
-* **Flash over USB** (preferred — gives serial too): `pio run -e x3 -t upload
-  --upload-port /dev/cu.usbmodem*` (~20s, hash-verified). The X3 needs a 4-pin
-  data pogo cable (2-pin is charge-only). Deep sleep drops the USB port — press
-  power to wake before flashing.
+* Build: `../.venv/bin/pio run -e lume-x3`.
+* **Flash over USB**: `../.venv/bin/pio run -e lume-x3 -t upload
+  --upload-port /dev/cu.usbmodem*`. The X3 needs a 4-pin data pogo cable.
+  Deep sleep drops the USB port; press power to wake before flashing.
 * **Serial**: 115200. Capture with a pyserial reset-and-read (DTR/RTS pulse);
   the device is silent when idle (e-ink logs on events only). This is the main
   debugging tool — e.g. the ANCS queue-overflow and encrypted-vs-connected
@@ -178,33 +175,28 @@ accepts) to the SD root as `update.bin` and reboot. xphone-os flashes it into
 the other OTA slot and hands over. To flash the same image again later, rename
 `update.bin.flashed` back to `update.bin`.
 
-## Envs
+## Environment
 
-Runtime X3/X4 detection is sidestepped: each env compiles exactly one
-`-DFREEINK_DEVICE_*`, so the right panel driver and geometry are fixed at
-build time.
+The only environment is an X3 clean cutover:
 
 | env | device | panel | resolution |
 |-----|--------|-------|------------|
-| `x3` (default) | Xteink X3 | UC8253 | 792x528 |
-| `x4` | Xteink X4 | SSD1677 | 800x480 |
+| `lume-x3` (default) | Xteink X3 | UC8253 | 792×528 |
 
 ## Build / flash
 
 ```bash
-pio run -e x3              # build X3
-pio run -e x3 -t upload    # flash X3
-pio run -e x4 -t upload    # flash X4
-pio device monitor         # 115200 baud, boot report
+../.venv/bin/pio run -e lume-x3
+../.venv/bin/pio run -e lume-x3 -t upload
+../.venv/bin/pio device monitor --baud 115200
 ```
 
 ### Releases
 
-Tag `main` with `fw-vX.Y.Z` to have CI build and publish `flowe-x3.bin` and
-`flowe-x4.bin` with checksums. Users can download the firmware from the GitHub
-releases page and copy the appropriate binary to an SD card as `update.bin`.
+Tag `main` with `fw-vX.Y.Z` to have CI build and publish `lume-x3.bin`,
+`lume-x3-X.Y.Z.bin`, `update.bin`, a zip wrapper and checksums.
 
-## Measured size (M1)
+## Upstream historical milestone record (M1–M5)
 
 | env | RAM | Flash |
 |-----|-----|-------|

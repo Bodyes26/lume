@@ -27,7 +27,7 @@ constexpr uint32_t kFailedLingerMs = 6000;
 // synchronously, so a small burst per tick is enough.
 constexpr int kPumpPerTick = 8;
 
-constexpr const char* kHostname = "xphone";
+constexpr const char* kHostname = "lume";
 }  // namespace
 
 void FileTransferScene::onEnter() {
@@ -268,7 +268,7 @@ void FileTransferScene::render(Gfx& gfx) {
 
   switch (_state) {
     case State::Idle:
-      gfx.drawText(kFontRegular, kMarginX, y, "Move books with the Flowe app");
+      gfx.drawText(kFontRegular, kMarginX, y, "Move books with the Lume app");
       y += lineReg + 4;
       gfx.drawText(kFontRegular, kMarginX, y, "over Wi-Fi.");
       y += lineReg + 24;
@@ -279,11 +279,11 @@ void FileTransferScene::render(Gfx& gfx) {
         y += lineReg + 20;
         gfx.drawText(kFontRegular, kMarginX, y, "Press SYNC to join it, or start");
         y += lineReg + 4;
-        gfx.drawText(kFontRegular, kMarginX, y, "a sync from the Flowe app.");
+        gfx.drawText(kFontRegular, kMarginX, y, "a sync from the Lume app.");
       } else {
         gfx.drawText(kFontBold, kMarginX, y, "No Wi-Fi saved yet");
         y += lineBold + 4;
-        gfx.drawText(kFontRegular, kMarginX, y, "Add your network in the Flowe");
+        gfx.drawText(kFontRegular, kMarginX, y, "Add your network in the Lume");
         y += lineReg + 4;
         gfx.drawText(kFontRegular, kMarginX, y, "app (Read tab > Sync).");
       }
@@ -306,7 +306,7 @@ void FileTransferScene::render(Gfx& gfx) {
       snprintf(url, sizeof(url), "http://%s/", _ip);
       gfx.drawTextCentered(kFontBold, w / 2, y, url);
       y += lineBold + 6;
-      gfx.drawTextCentered(kFontRegular, w / 2, y, "Open Flowe > Read > Sync");
+      gfx.drawTextCentered(kFontRegular, w / 2, y, "Open Lume > Read > Sync");
       y += lineReg + 24;
 
       char stats[64];
@@ -320,7 +320,7 @@ void FileTransferScene::render(Gfx& gfx) {
     case State::Failed:
       gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - 2 * lineBold, _failReason);
       gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 - lineBold + 8,
-                           _ssid[0] ? "RETRY to try again" : "Add Wi-Fi in the Flowe app");
+                           _ssid[0] ? "RETRY to try again" : "Add Wi-Fi in the Lume app");
       break;
   }
 }

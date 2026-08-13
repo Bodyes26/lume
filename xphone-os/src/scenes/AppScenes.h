@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-constexpr const char* XPHONE_VERSION = "0.5.0";
+constexpr const char* XPHONE_VERSION = "0.1.0-dev";
 
 // M4.2 last-scene restore: a stable id for each restorable scene. Persisted in
 // RTC memory at sleep (Sleep.cpp) and dispatched by boot() on wake so the

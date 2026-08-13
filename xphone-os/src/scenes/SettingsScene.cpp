@@ -2,7 +2,6 @@
 
 #include <SDCardManager.h>
 
-#include "../DeviceKind.h"
 #include <esp_system.h>
 
 #include <cstdio>
@@ -196,7 +195,7 @@ void SettingsScene::handleInput(Input& in) {
       if (in.wasPressed(Btn::Down) || in.wasPressed(Btn::Right)) moveSel(_menuSel, kMenuCount, +1);
       if (in.wasPressed(Btn::Confirm)) {
         if (_menuSel == 0) {
-          showFileTransfer();  // R2: Wi-Fi book sync with the Flowe app
+          showFileTransfer();  // R2: Wi-Fi book sync with the Lume app
           return;
         } else if (_menuSel == 1) {
           enterPicker();
@@ -298,7 +297,7 @@ void SettingsScene::renderMenu(Gfx& gfx) {
   // Footer: firmware version + build env, bottom of the content area
   // (mirrors CrossPoint showing CROSSPOINT_VERSION in the settings header).
   char footer[64];
-  snprintf(footer, sizeof(footer), "xphone-os %s (%s)", XPHONE_VERSION, gDeviceIsX3 ? "x3" : "x4");
+  snprintf(footer, sizeof(footer), "Lume %s (X3)", XPHONE_VERSION);
   const int footY = gfx.height() - Scene::SOFTKEY_BAR_H - gfx.lineHeight(kFontRegular) - 6;
   gfx.drawTextCentered(kFontRegular, gfx.width() / 2, footY, footer);
 }

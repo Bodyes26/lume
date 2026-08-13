@@ -28,7 +28,7 @@ void AboutScene::render(Gfx& gfx) {
   const int x = 24;
   int y = 16;
 
-  gfx.drawText(kFontBold, x, y, "About xphone-os");
+  gfx.drawText(kFontBold, x, y, "About Lume");
   y += gfx.lineHeight(kFontBold) + 10;
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
 

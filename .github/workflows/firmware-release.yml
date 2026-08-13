@@ -1,4 +1,4 @@
-name: Firmware Release
+name: Lume Firmware Release
 
 on:
   push:
@@ -35,8 +35,8 @@ jobs:
             xphone-os/.pio/build
           key: ${{ runner.os }}-platformio-${{ hashFiles('xphone-os/platformio.ini') }}
 
-      - name: Install PlatformIO
-        run: python -m pip install platformio
+      - name: Install PlatformIO 6.1.19
+        run: python -m pip install platformio==6.1.19
 
       - name: Resolve release version
         env:
@@ -53,44 +53,38 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
 
-      - name: Build firmware
-        run: cd xphone-os && pio run -e x3 -e x4
+      - name: Build Lume for X3
+        run: cd xphone-os && pio run -e lume-x3
 
       - name: Stage release assets
         run: |
           mkdir -p dist
-          cp xphone-os/.pio/build/x3/firmware.bin dist/flowe-x3.bin
-          cp xphone-os/.pio/build/x4/firmware.bin dist/flowe-x4.bin
-          cp dist/flowe-x3.bin "dist/flowe-x3-${VERSION}.bin"
-          cp dist/flowe-x4.bin "dist/flowe-x4-${VERSION}.bin"
+          cp xphone-os/.pio/build/lume-x3/firmware.bin dist/lume-x3.bin
+          cp dist/lume-x3.bin "dist/lume-x3-${VERSION}.bin"
           # Pre-named for the SD updater so users skip the rename step.
-          cp dist/flowe-x3.bin dist/update.bin
+          cp dist/lume-x3.bin dist/update.bin
 
           # Zip wrapper: a re-downloaded zip gets browser-renamed, but the
           # update.bin inside keeps its exact name.
-          mkdir -p ziproot/flowe-x3
-          cp dist/flowe-x3.bin ziproot/flowe-x3/update.bin
+          mkdir -p ziproot/lume-x3
+          cp dist/lume-x3.bin ziproot/lume-x3/update.bin
           printf '%s\n' \
-            'Flowe OS - X3 firmware' \
+            'Lume - Xteink X3 firmware' \
             '' \
             '1. Copy update.bin to the root of the microSD card.' \
             '2. Put the card back in the X3.' \
             '3. Hold the left side button and power together until the' \
             '   update screen appears.' \
-            '' \
-            'Guide: https://www.flowe.ink/flash' \
-            > ziproot/flowe-x3/README.txt
-          (cd ziproot && zip -qr ../dist/flowe-x3.zip flowe-x3)
+            > ziproot/lume-x3/README.txt
+          (cd ziproot && zip -qr ../dist/lume-x3.zip lume-x3)
 
           (
             cd dist
             sha256sum \
-              flowe-x3.zip \
+              lume-x3.zip \
               update.bin \
-              flowe-x3.bin \
-              flowe-x4.bin \
-              "flowe-x3-${VERSION}.bin" \
-              "flowe-x4-${VERSION}.bin" \
+              lume-x3.bin \
+              "lume-x3-${VERSION}.bin" \
               > SHA256SUMS.txt
           )
 
@@ -111,12 +105,8 @@ jobs:
               "date": os.environ["RELEASE_DATE"],
               "assets": {
                   "x3": {
-                      "file": "flowe-x3.bin",
-                      "sha256": sha256(dist / "flowe-x3.bin"),
-                  },
-                  "x4": {
-                      "file": "flowe-x4.bin",
-                      "sha256": sha256(dist / "flowe-x4.bin"),
+                      "file": "lume-x3.bin",
+                      "sha256": sha256(dist / "lume-x3.bin"),
                   },
               },
           }
@@ -131,7 +121,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Firmware ${{ env.VERSION }}
+          name: Lume ${{ env.VERSION }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*

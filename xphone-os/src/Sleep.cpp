@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 
-#include "DeviceKind.h"
 #include <BoardConfig.h>
 #include <EInkDisplay.h>
 #include <InputManager.h>
@@ -84,12 +83,11 @@ uint8_t gTombScratch[NotificationStore::TOMBSTONE_CAPACITY * sizeof(Notification
 // (e-ink retains unpowered; UC8253 DEEP_SLEEP 0x07, SSD1677 DEEP_SLEEP 0x10).
 // M4.1 dormant frame: when the priorities store holds a snapshot, the glass
 // holds the day's list all night
-// (PrioritiesScene::renderDormant — list + moon/"xphone" stamp + wake hint);
-// otherwise the original centered "xphone" wordmark over a short rule, wake
-// hint at the bottom. No RTC on X3/X4 (docs/x3-vs-x4-hardware.md "no RTC
-// chip"), so no clock — and no "synced Xm ago" stamp — to show. M4 power
-// model: the panel controller is always powered while awake (no idle-sleep
-// middle state), so no wake/re-init is needed before drawing.
+// (PrioritiesScene::renderDormant — list + moon/"lume" stamp + wake hint);
+// otherwise the original centered "lume" wordmark over a short rule, wake
+// hint at the bottom. RTC support is planned but not active yet, so no clock
+// or "synced Xm ago" stamp is shown. The panel controller stays powered while
+// awake; there is no idle-sleep middle state.
 // ---------------------------------------------------------------------------
 void drawSleepScreen(Gfx& gfx) {
   gfx.clear();
@@ -105,7 +103,7 @@ void drawSleepScreen(Gfx& gfx) {
   } else if (!PrioritiesScene::renderDormant(gfx)) {
     const int cx = gfx.width() / 2;
     const int wordmarkY = gfx.height() * 2 / 5;
-    gfx.drawTextCentered(kFontBold, cx, wordmarkY, "xphone");
+    gfx.drawTextCentered(kFontBold, cx, wordmarkY, "lume");
 
     // Short 2px rule under the wordmark (same rule style as AboutScene).
     constexpr int kRuleW = 56;
@@ -141,8 +139,8 @@ void drawSleepScreen(Gfx& gfx) {
 // path (minimal I2C, no SDK link — x4-os is read-only reference). Registers/
 // addresses: HalTiltSensor.h:44-64, HalGPIO.h:35-39.
 // ---------------------------------------------------------------------------
-// Compiled unconditionally for the universal binary; only CALLED on an X3
-// (gDeviceIsX3) — the X4 profile's gauge pins don't carry this bus.
+// Lume targets X3 only; always called before power-off so the QMI8658
+// oscillator is not left running.
 constexpr uint8_t kImuAddr = 0x6B;     // I2C_ADDR_QMI8658
 constexpr uint8_t kImuAddrAlt = 0x6A;  // I2C_ADDR_QMI8658_ALT
 constexpr uint8_t kImuWhoAmIReg = 0x00;
@@ -362,8 +360,8 @@ void sleepNow(Gfx& gfx, Input& input) {
     COMPANION_BLE.stopAdvertising();
   }
 
-  // 3. IMU (X3 only): make sure the QMI8658's internal oscillator is off.
-  if (::gDeviceIsX3) imuSleep();
+  // 3. Stop the X3 QMI8658 internal oscillator.
+  imuSleep();
 
   // 4. Panel controller into deep sleep, holding the sleep screen — the only
   //    panel deepSleep() in the OS under the M4 two-state power model (x4-os

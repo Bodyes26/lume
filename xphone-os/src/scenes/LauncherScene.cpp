@@ -10,6 +10,7 @@
 #include "../IconStyle.h"
 #include "../StatusBar.h"
 #include "../art/LauncherIcons.h"
+#include "../art/LumeMark.h"
 #include "../ble/CompanionBleService.h"
 #include "AppScenes.h"
 
@@ -155,23 +156,9 @@ void LauncherScene::render(Gfx& gfx) {
   const int w = gfx.width();
   const int h = gfx.height();
 
-  // --- Status bar: Flowe lockup left, battery icon + percent right ----------
-  // Brand mark from primitives (brand/assets/mark-reference.png): a half sun
-  // sitting on the horizon with shrinking water-ripple bars beneath, then the
-  // lowercase "flowe" wordmark beside it.
-  {
-    constexpr int kSunD = 22;
-    const int sunX = kMargin;
-    const int sunTop = 6;
-    const int horizonY = sunTop + kSunD / 2;
-    gfx.fillRoundedRect(sunX, sunTop, kSunD, kSunD, kSunD / 2, true);
-    gfx.fillRect(sunX - 2, horizonY, kSunD + 4, kSunD / 2 + 2, false);  // carve below the horizon
-    const int sunCx = sunX + kSunD / 2;
-    gfx.fillRect(sunCx - (kSunD + 4) / 2, horizonY + 3, kSunD + 4, 2, true);   // ripples
-    gfx.fillRect(sunCx - (kSunD - 8) / 2, horizonY + 8, kSunD - 8, 2, true);
-    gfx.fillRect(sunCx - (kSunD - 16) / 2, horizonY + 13, kSunD - 16, 2, true);
-    gfx.drawText(kFontBold, sunX + kSunD + 10, 4, "flowe");
-  }
+  // --- Status bar: Lume lockup left, battery icon + percent right ----------
+  drawLumeMark(gfx, kMargin + 12, 3, 24);
+  gfx.drawText(kFontBold, kMargin + 34, 4, "lume");
   // CrossPoint-style indicator (StatusBar.h): 15x12 body + nub, proportional
   // fill, percent in kFontSmall to the left. Unknown reads draw "--%" and an
   // empty body so the layout stays stable. Charging bolt when the BQ27220

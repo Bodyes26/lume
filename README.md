@@ -1,21 +1,26 @@
-# Flowe OS
+# Lume
 
-Open-source firmware for the pocket-size [Xteink X3 or X4](https://www.xteink.com)
-e-ink device. Paired with the Flowe iOS app, it puts your priorities, agenda,
-and notifications on calm paper-like glass — and starts focus blocks that
-shield the apps you choose on your iPhone.
+Lume is a personal, Xteink X3-only fork of
+[Flowe OS](https://github.com/andrewjiang/flowe-os). It keeps the upstream
+ESP32-C3 firmware architecture and companion protocol while moving toward an
+Italian, configurable desk dashboard and a new iOS companion app.
 
-Part of [Flowe](https://www.flowe.ink). Firmware is MIT-licensed;
-vendored libraries keep their own licenses.
+**Current state:** firmware `0.1.0-dev`; the X3-only build, Lume identity and
+release pipeline are in place. The Lume iOS app is not implemented yet, so
+phone-driven cards still require a protocol-compatible companion. The EPUB
+reader works independently from the phone.
 
-**Requires:** an Xteink X3 or X4 (both hardware-validated as of fw-v0.3.0) and an iPhone with the Flowe companion app for everything
-beyond reading.
+Development decisions, verified architecture notes and the cross-session
+handoff start at [`docs/lume/START-HERE.md`](docs/lume/START-HERE.md).
 
 <p align="center">
   <img src="docs/screens/launcher.png" width="240" alt="Launcher" />
   <img src="docs/screens/priorities.png" width="240" alt="Priorities" />
   <img src="docs/screens/block.png" width="240" alt="Block" />
 </p>
+
+The screenshots above document the inherited upstream UI; visible branding is
+being replaced incrementally.
 
 ## The apps
 
@@ -48,22 +53,20 @@ so wake picks up where you left off.
   <img src="docs/screens/poster.png" width="240" alt="Sleep screen" />
 </p>
 
-## Pairing with the iOS app
+## Companion protocol
 
-Flowe OS pairs like any Bluetooth accessory: open the Flowe app, pick the
-device, accept the pairing prompt on your iPhone. One bonded, encrypted BLE
-link then carries everything:
+Lume remains wire-compatible with the upstream app during the fork transition.
+It advertises as **`Lume X3`**, but iOS discovers it through the unchanged GATT
+service UUID rather than the display name. One bonded BLE link carries:
 
-- **ANCS** (Apple's notification service) delivers notifications — no
-  special entitlements, no private APIs.
-- **JSON cards** over a simple GATT service carry priorities, agenda,
-  workout plans, and block status. The protocol is small and readable:
-  [`xphone-os/src/ble/`](xphone-os/src/ble/).
+- **ANCS**, Apple's public notification service;
+- **JSON cards and actions** for priorities, agenda, workouts and block state;
+- **ephemeral Wi-Fi credentials and transfer commands** for EPUB sync.
 
-The iOS app does the phone-side work — speech-to-priorities (parsed
-on-device with Apple's models), calendar, Screen Time shields — and ships
-via the Flowe beta at [www.flowe.ink](https://www.flowe.ink).
-The reader works with no app.
+The complete implementer-facing specification for the new iOS app, including
+UUIDs, payload schemas, limits, ordering and reconnect behavior, is
+[`docs/lume/03-protocollo-ble.md`](docs/lume/03-protocollo-ble.md).
+The reader itself needs no companion app.
 
 ## Performance
 
@@ -83,32 +86,28 @@ and 2.5 MB of its 6.5 MB app partition.
 
 ## Install
 
-Grab `update.bin` from [Releases](https://github.com/andrewjiang/flowe-os/releases) —
-grab the zip for your device (flowe-x3 or flowe-x4); each contains the image. Changelogs live in the [release notes](https://github.com/andrewjiang/flowe-os/releases) — each release lists what changed on the device, pre-named for the SD updater —
-or follow the step-by-step guide at
-[www.flowe.ink/flash](https://www.flowe.ink/flash).
+No public Lume release has been published yet. For development, build
+`xphone-os/.pio/build/lume-x3/firmware.bin`, or rename that image to
+`update.bin` and copy it to the root of the microSD card. Insert the card and
+hold **Left + Power**. The updater validates the image before switching the
+inactive OTA slot.
 
-**SD card** (no data cable needed): copy `update.bin` to the SD root,
-insert, hold **Left + Power**. The
-updater checks the image's header, segments, checksum, and SHA-256 trailer
-before writing the inactive OTA slot, and switches the boot slot only after
-every write succeeds.
-
-Going back works the same way: copy a CrossPoint release `firmware.bin`
-to the card as `update.bin` — the stock-to-Flowe-to-CrossPoint round trip
-is how this firmware was developed.
+The X3 fingerprint guard runs before display initialization. If the image is
+accidentally installed on non-X3 hardware, Lume leaves the panel untouched and
+halts for USB recovery.
 
 ## Build from source
 
-[PlatformIO](https://platformio.org), two targets:
+The repository-local Python environment keeps the developer toolchain separate
+from the rest of the workstation:
 
 ```sh
+python3.11 -m venv .venv
+.venv/bin/python -m pip install platformio==6.1.19
 cd xphone-os
-pio run -e x3            # Xteink X3 (hardware-validated)
-pio run -e x4            # Xteink X4 (hardware-validated)
-pio run -e x4            # Xteink X4 (compiles; not validated on hardware)
-pio run -e x3 -t upload  # flash your build over USB
-pio device monitor --baud 115200
+../.venv/bin/pio run -e lume-x3
+../.venv/bin/pio run -e lume-x3 -t upload
+../.venv/bin/pio device monitor --baud 115200
 ```
 
 USB flashing needs the 4-pin data pogo cable — the 2-pin cable bundled with
@@ -122,6 +121,6 @@ adapted from [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader
 
 ## License
 
-MIT for Flowe OS — see [LICENSE](LICENSE). Vendored libraries under
+Lume and the inherited Flowe OS firmware are MIT-licensed — see [LICENSE](LICENSE). Vendored libraries under
 `xphone-os/lib/` and `freeink-sdk/` retain their original licenses
 (MIT, Apache-2.0, and Zlib).

@@ -248,10 +248,9 @@ void CompanionBleService::begin() {
 
   advertising = BLEDevice::getAdvertising();
   // 31-byte adv packet budget: flags (3) + ANCS solicitation (18) = 21 bytes.
-  // The per-device name ("xphone X3"/"xphone X4", 11 bytes with header) does
-  // not fit alongside them, so it rides in the scan response next to the
-  // companion service UUID (18 + 11 = 29 bytes) — the iOS app matches on the
-  // service UUID, which CoreBluetooth also reads from the scan response.
+  // "Lume X3" rides in the scan response next to the companion service UUID;
+  // the iOS app matches on that UUID, which CoreBluetooth also reads from the
+  // scan response.
   BLEAdvertisementData advertisementData;
   addFlags(advertisementData);
   addAncsSolicitation(advertisementData);

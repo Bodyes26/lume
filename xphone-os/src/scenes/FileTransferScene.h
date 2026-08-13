@@ -5,7 +5,7 @@
 // Modeled on CrossPoint's CrossPointWebServerActivity (x4-os
 // src/activities/network/CrossPointWebServerActivity.cpp) with the setup
 // maze removed: instead of an on-device network picker + password keyboard,
-// STA credentials arrive from the Flowe app over BLE (WifiCreds/NVS) and the
+// STA credentials arrive from the Lume app over BLE (WifiCreds/NVS) and the
 // phone can start/stop the whole mode remotely ("transfer.start" command —
 // main.cpp pumps it into showFileTransferAutoStart()).
 //

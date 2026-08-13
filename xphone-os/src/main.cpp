@@ -40,7 +40,7 @@
 #include "Sleep.h"
 #include "ble/CompanionAncsClient.h"
 #include "ble/CompanionBleService.h"
-#include "art/FloweLogo.h"
+#include "art/LumeMark.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "scenes/AppScenes.h"
@@ -62,33 +62,16 @@ static Input input;
 #include "CpuBoost.h"
 
 // ---------------------------------------------------------------------------
-// Boot splash — the very first frame on glass. The panel's first two FULL
-// refreshes after power-on flash black while the driver conditions the
-// particles, so make both flashes carry content: flash 1 paints this splash,
-// flash 2 is the launcher's first paint below — press -> splash -> launcher
-// on every boot (cold boot and deep-sleep wake share this path). flowe mark
-// (sun over water) above the wordmark, "waking up..." under the rule; no
-// delays, the rest of boot runs while the splash sits on glass.
+// Boot splash — the first frame on glass. The mark is geometric and scales
+// without an embedded bitmap; both the conditioning refresh and launcher use
+// the same Lume identity.
 // ---------------------------------------------------------------------------
-
-// 1bpp blitter (format per FloweLogo.h: MSB-first, bit 0 = ink; only ink
-// pixels are drawn so the paper stays white).
-static void drawFloweLogo(Gfx& g, const int x, const int y) {
-  const int rowBytes = (FloweLogoWidth + 7) / 8;
-  for (int row = 0; row < FloweLogoHeight; ++row) {
-    for (int col = 0; col < FloweLogoWidth; ++col) {
-      const uint8_t byte = FloweLogoBitmap[row * rowBytes + (col >> 3)];
-      if (((byte >> (7 - (col & 7))) & 1) == 0) g.drawPixel(x + col, y + row, true);
-    }
-  }
-}
-
 static void drawBootSplash(Gfx& g) {
   g.clear();
   const int cx = g.width() / 2;
   const int wordmarkY = g.height() * 2 / 5;
-  drawFloweLogo(g, cx - FloweLogoWidth / 2, wordmarkY - FloweLogoHeight - 18);
-  g.drawTextCentered(kFontBold, cx, wordmarkY, "flowe");
+  drawLumeMark(g, cx, wordmarkY - 138, 120);
+  g.drawTextCentered(kFontBold, cx, wordmarkY, "lume");
   constexpr int kRuleW = 56;
   const int ruleY = wordmarkY + g.lineHeight(kFontBold) + 10;
   g.fillRect(cx - kRuleW / 2, ruleY, kRuleW, 2, true);
@@ -103,9 +86,6 @@ static void drawBootSplash(Gfx& g) {
 #include <SDCardManager.h>
 #include <XteinkDetect.h>
 
-#include "DeviceKind.h"
-
-bool gDeviceIsX3 = false;  // set in boot() by selectXteinkDevice(); X4 = SDK default
 
 // Remote-debug breadcrumbs for units that never paint (field X3 that hangs
 // under xphone-os with no serial access; CrossPoint works). Armed ONLY when
@@ -158,16 +138,17 @@ static void boot() {
   Serial.setTxTimeoutMs(1);
   const unsigned long tSerial = millis();
 
-  // Stage 2: device fingerprint, then display. One binary serves X3 and X4
-  // (field brick: X4 bin on an X3 drives SSD1677 protocol at UC8253 glass —
-  // frozen panel, "dead" buttons). selectXteinkDevice() probes the X3-only
-  // I2C parts (gauge/RTC/IMU) and sets BoardConfig::ACTIVE; it must run
-  // BEFORE SD + display bring-up (XteinkDetect.h contract).
-  gDeviceIsX3 = freeink::selectXteinkDevice();
-  Serial.printf("[xphone-os] boot: xteink detect -> %s\n", gDeviceIsX3 ? "X3" : "X4");
-  if (gDeviceIsX3) {
-    display.setDisplayX3();
+  // Stage 2: X3 guard, then display. Lume links only the UC8253 X3 driver,
+  // so a misplaced update.bin must be rejected before any panel command.
+  // The fingerprint requires at least two of the X3-only gauge/RTC/IMU in
+  // two consecutive passes; anything else halts for USB recovery.
+  if (!freeink::detectXteinkIsX3()) {
+    Serial.println("[lume] FATAL: Xteink X3 fingerprint not found; display left untouched");
+    Serial.flush();
+    while (true) delay(1000);
   }
+  display.setDisplayX3();
+  Serial.println("[lume] boot: Xteink X3 confirmed");
   // Shared SPI bus, initialized ONCE with the SD card's MISO attached
   // (mirrors x4-os/lib/hal/HalGPIO.cpp:195). Display and SD share SCLK=8 /
   // MOSI=10; SD adds MISO=7 + CS=12 (BoardConfig.h XTEINK_X3/X4 profiles).
@@ -187,7 +168,7 @@ static void boot() {
     if (probe) {
       probe.close();
       gBootTrace = true;
-      bootTrace(gDeviceIsX3 ? "boot: spi up, detect=X3" : "boot: spi up, detect=X4");
+      bootTrace("boot: spi up, detect=X3");
     }
   }
 
@@ -272,10 +253,9 @@ static void boot() {
 
   // Stage 5 (M2): radios — deliberately AFTER the launcher's first paint so
   // the UI is on glass before the BLE stack spins up ("UI first, radios
-  // second"). begin() advertises the same companion GATT service UUID as
-  // x4-os (name is per-device: "xphone X3"/"xphone X4", with the ANCS
-  // solicitation UUID in the adv packet); the ANCS client arms itself and
-  // starts service discovery once an iPhone connects and the link
+  // second"). begin() advertises the companion GATT service UUID under the
+  // human-visible name "Lume X3"; the ANCS client arms itself and starts
+  // service discovery once an iPhone connects and the link
   // authenticates (that is when iOS shows its pairing prompt).
   // Inflate dict (32 KB zip window) — current design, after two failed
   // experiments: the dict is heap-claimed only while the Reader scene is up
