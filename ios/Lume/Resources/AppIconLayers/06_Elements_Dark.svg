@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path d="M 66.56 914.77 Q 512.00 695.47 957.44 914.77" 
+        fill="none" stroke="#EBE6D6" stroke-width="19.63" stroke-linecap="round"/>
+  <polygon points="512.00,550.40 550.83,805.97 473.17,805.97" 
+           fill="#EBE6D6"/>
+  <polygon points="512.00,264.53 532.05,430.08 725.33,460.80 532.05,491.52 512.00,550.40 491.95,491.52 298.67,460.80 491.95,430.08" 
+           fill="#F59E0B"/>
+  <circle cx="512.00" cy="215.04" r="17.49" fill="#EBE6D6"/>
+  <circle cx="400.21" cy="242.35" r="8.11" fill="#EBE6D6"/>
+  <circle cx="329.39" cy="291.84" r="8.11" fill="#EBE6D6"/>
+  <circle cx="279.89" cy="361.81" r="8.11" fill="#EBE6D6"/>
+  <circle cx="262.83" cy="460.80" r="17.49" fill="#EBE6D6"/>
+  <circle cx="279.89" cy="559.79" r="8.11" fill="#EBE6D6"/>
+  <circle cx="329.39" cy="629.76" r="8.11" fill="#EBE6D6"/>
+  <circle cx="400.21" cy="679.25" r="8.11" fill="#EBE6D6"/>
+  <circle cx="623.79" cy="679.25" r="8.11" fill="#EBE6D6"/>
+  <circle cx="694.61" cy="629.76" r="8.11" fill="#EBE6D6"/>
+  <circle cx="744.11" cy="559.79" r="8.11" fill="#EBE6D6"/>
+  <circle cx="761.17" cy="460.80" r="17.49" fill="#EBE6D6"/>
+  <circle cx="744.11" cy="361.81" r="8.11" fill="#EBE6D6"/>
+  <circle cx="694.61" cy="291.84" r="8.11" fill="#EBE6D6"/>
+  <circle cx="623.79" cy="242.35" r="8.11" fill="#EBE6D6"/>
+</svg>

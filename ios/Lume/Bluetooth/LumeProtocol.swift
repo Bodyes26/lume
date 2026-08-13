@@ -29,6 +29,7 @@ enum LumeProtocol {
     static let schemaVersion = 1
     static let maximumCardBytes = 512
     static let maximumPriorityItems = 10
+    static let maximumTodayItems = 6
 
     static func makeTimeSync(date: Date = .now, calendar: Calendar = .current) throws -> Data {
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
@@ -98,6 +99,53 @@ enum LumeProtocol {
         }
     }
 
+    static func makeTodaySnapshot(
+        entries: [TodayEntry],
+        maximumPayloadBytes: Int,
+        now: Date = .now,
+        calendar: Calendar = .current,
+        locale: Locale = Locale(identifier: "it_IT")
+    ) throws -> Data {
+        let byteLimit = min(maximumCardBytes, maximumPayloadBytes)
+        let identifier = "today-sync-\(Int(now.timeIntervalSince1970))"
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = locale
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "HH:mm"
+        let sync = "Aggiornato \(formatter.string(from: now))"
+
+        var packed: [SafeTodayEntry] = []
+        let empty = try encode(TodaySnapshotPayload(
+            id: identifier,
+            sync: sync,
+            items: []
+        ))
+        guard empty.count <= byteLimit else {
+            throw LumeProtocolError.payloadLimitTooSmall(byteLimit)
+        }
+
+        for entry in entries.prefix(maximumTodayItems).map(SafeTodayEntry.init) {
+            let candidate = packed + [entry]
+            let probe = try encode(TodaySnapshotPayload(
+                id: identifier,
+                sync: sync,
+                items: candidate
+            ))
+            guard probe.count <= byteLimit else {
+                if packed.isEmpty { throw LumeProtocolError.itemTooLarge(entry.title) }
+                break
+            }
+            packed = candidate
+        }
+
+        return try encode(TodaySnapshotPayload(
+            id: identifier,
+            sync: sync,
+            items: packed
+        ))
+    }
+
     static func decodeAction(_ data: Data) throws -> LumeDeviceAction {
         try JSONDecoder().decode(LumeDeviceAction.self, from: data)
     }
@@ -142,6 +190,41 @@ private struct PrioritySnapshotPayload: Encodable {
     let part: Int
     let parts: Int
     let priorityItems: [SafePriority]
+}
+
+private struct TodaySnapshotPayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "card"
+    let kind = "today.snapshot"
+    let id: String
+    let title = "Oggi"
+    let sync: String
+    let items: [SafeTodayEntry]
+}
+
+private struct SafeTodayEntry: Encodable {
+    let kind: String
+    let time: String
+    let title: String
+    let subtitle: String
+    let state: String
+
+    init(_ entry: TodayEntry) {
+        kind = entry.kind.rawValue
+        time = entry.time.prefixUTF8(maxBytes: 48)
+        title = entry.title.prefixUTF8(maxBytes: 96)
+        subtitle = entry.subtitle.prefixUTF8(maxBytes: 48)
+        state = entry.state.prefixUTF8(maxBytes: 64)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.unkeyedContainer()
+        try values.encode(kind)
+        try values.encode(time)
+        try values.encode(title)
+        try values.encode(subtitle)
+        try values.encode(state)
+    }
 }
 
 private struct SafePriority: Encodable {

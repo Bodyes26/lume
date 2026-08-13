@@ -7,17 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		067365BA1450DECE081E017D /* 03_LighthouseTower.svg in Resources */ = {isa = PBXBuildFile; fileRef = 8670B5AFC7C49F61C2F097B4 /* 03_LighthouseTower.svg */; };
+		0FA89CA94A729693353CA4FD /* 04_LighthouseStar.svg in Resources */ = {isa = PBXBuildFile; fileRef = BFB2FCD9D93C6E9E93EDFC48 /* 04_LighthouseStar.svg */; };
+		151D117B8755B07FEA046BB4 /* TodayProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F263DB6C70F5C5EB2E80148 /* TodayProjection.swift */; };
+		2048B3BCD12AE93852471B45 /* 06_Elements_Dark.svg in Resources */ = {isa = PBXBuildFile; fileRef = C775C3CD1F40A348FBC8502E /* 06_Elements_Dark.svg */; };
 		37F7F86AB724F71AC231CCDB /* LumeMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEF40D615CDEE23786C4E4D /* LumeMark.swift */; };
 		4105FA5165E067D37AEF8608 /* LumeProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD95C8F3A2A405DEF8270F75 /* LumeProtocolTests.swift */; };
 		47B0AC4694FB271A94B8153A /* LumeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078EF2DA8DDA212B59798ED9 /* LumeProtocol.swift */; };
 		49F26354885BDABBD8458F1D /* PrioritiesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1265FED2FEF8FBA90D4CA6 /* PrioritiesView.swift */; };
 		4E9835D5AC7F23EBF14A06BD /* PriorityItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1871AA0BB343B184DA4BAFFE /* PriorityItem.swift */; };
 		7174D7CFF1F30E0E71AC9050 /* LumeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BEE23B93A94D105C0A987F /* LumeApp.swift */; };
+		7E60D308DB208FE63C441695 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C5B9C52E9C3FF4BF88220FD /* TodayView.swift */; };
 		A726CF144F385946F7DD113A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31FE09EC8BA0521FE291604 /* AppModel.swift */; };
 		AB880CDD6932AE4B2F0910B6 /* AppIcon60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 576E60FA0F3ABBD2F0CCA8D2 /* AppIcon60@2x.png */; };
+		B89D069AA031EA93CCC417B8 /* 01_Background.svg in Resources */ = {isa = PBXBuildFile; fileRef = 583A42875F2B015DF25334AB /* 01_Background.svg */; };
 		BC91A8BFD1AA2085ECAFD452 /* PrioritiesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C5556A610747FEE422E35B2 /* PrioritiesStore.swift */; };
+		BD2FD25E660A2BB23CF6C18B /* 01_Background_Dark.svg in Resources */ = {isa = PBXBuildFile; fileRef = BD4B36FA353CF009DCCE6ED6 /* 01_Background_Dark.svg */; };
+		C1289C304962366AE04CB9E1 /* 05_OrientationCorona.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0FBB496B17AB3363EB2477B6 /* 05_OrientationCorona.svg */; };
+		C90C84CF726D4CAEA7C005EF /* 02_Horizon.svg in Resources */ = {isa = PBXBuildFile; fileRef = 38118D2B0BE3830EF99339AB /* 02_Horizon.svg */; };
 		D9FCC0240675D289D119718A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD33722199521AF66C9AE2C /* RootView.swift */; };
+		DABB8F971B825F8E7C760509 /* TodayEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43EE9D5FF26F7268D4562457 /* TodayEntry.swift */; };
+		E11B3D15EDE59D20C802AAC1 /* TodayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9766F1472B5B31F05E3C143A /* TodayStore.swift */; };
 		E2CB8E731E249A8E92D9A77F /* LumeBluetoothManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF6BC534521453A49F94969 /* LumeBluetoothManager.swift */; };
+		E3F77332A9BC83A22902FC55 /* TodayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4BEBF819005878AD70654C /* TodayTests.swift */; };
 		F333F92FD5EDD90663149C76 /* AppIcon60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0D7306206A6E4DF0D83AE6D4 /* AppIcon60@3x.png */; };
 		F9BC2E9BDCBE5782CF67BF60 /* LumeTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D07852753B3A3FD362F10635 /* LumeTheme.swift */; };
 /* End PBXBuildFile section */
@@ -37,13 +49,25 @@
 		078EF2DA8DDA212B59798ED9 /* LumeProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeProtocol.swift; sourceTree = "<group>"; };
 		0CF6BC534521453A49F94969 /* LumeBluetoothManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeBluetoothManager.swift; sourceTree = "<group>"; };
 		0D7306206A6E4DF0D83AE6D4 /* AppIcon60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60@3x.png"; sourceTree = "<group>"; };
+		0FBB496B17AB3363EB2477B6 /* 05_OrientationCorona.svg */ = {isa = PBXFileReference; path = 05_OrientationCorona.svg; sourceTree = "<group>"; };
 		0FFE4586B021941AF3F4C1C4 /* Lume.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Lume.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1871AA0BB343B184DA4BAFFE /* PriorityItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriorityItem.swift; sourceTree = "<group>"; };
+		2C5B9C52E9C3FF4BF88220FD /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		38118D2B0BE3830EF99339AB /* 02_Horizon.svg */ = {isa = PBXFileReference; path = 02_Horizon.svg; sourceTree = "<group>"; };
 		3BD33722199521AF66C9AE2C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		43EE9D5FF26F7268D4562457 /* TodayEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayEntry.swift; sourceTree = "<group>"; };
 		576E60FA0F3ABBD2F0CCA8D2 /* AppIcon60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60@2x.png"; sourceTree = "<group>"; };
+		583A42875F2B015DF25334AB /* 01_Background.svg */ = {isa = PBXFileReference; path = 01_Background.svg; sourceTree = "<group>"; };
 		6C5556A610747FEE422E35B2 /* PrioritiesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrioritiesStore.swift; sourceTree = "<group>"; };
+		6F263DB6C70F5C5EB2E80148 /* TodayProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayProjection.swift; sourceTree = "<group>"; };
+		8670B5AFC7C49F61C2F097B4 /* 03_LighthouseTower.svg */ = {isa = PBXFileReference; path = 03_LighthouseTower.svg; sourceTree = "<group>"; };
+		9766F1472B5B31F05E3C143A /* TodayStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayStore.swift; sourceTree = "<group>"; };
+		9A4BEBF819005878AD70654C /* TodayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayTests.swift; sourceTree = "<group>"; };
 		BCEF40D615CDEE23786C4E4D /* LumeMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeMark.swift; sourceTree = "<group>"; };
+		BD4B36FA353CF009DCCE6ED6 /* 01_Background_Dark.svg */ = {isa = PBXFileReference; path = 01_Background_Dark.svg; sourceTree = "<group>"; };
+		BFB2FCD9D93C6E9E93EDFC48 /* 04_LighthouseStar.svg */ = {isa = PBXFileReference; path = 04_LighthouseStar.svg; sourceTree = "<group>"; };
 		C31FE09EC8BA0521FE291604 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		C775C3CD1F40A348FBC8502E /* 06_Elements_Dark.svg */ = {isa = PBXFileReference; path = 06_Elements_Dark.svg; sourceTree = "<group>"; };
 		CD95C8F3A2A405DEF8270F75 /* LumeProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeProtocolTests.swift; sourceTree = "<group>"; };
 		D07852753B3A3FD362F10635 /* LumeTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeTheme.swift; sourceTree = "<group>"; };
 		FA1265FED2FEF8FBA90D4CA6 /* PrioritiesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrioritiesView.swift; sourceTree = "<group>"; };
@@ -96,8 +120,23 @@
 			children = (
 				576E60FA0F3ABBD2F0CCA8D2 /* AppIcon60@2x.png */,
 				0D7306206A6E4DF0D83AE6D4 /* AppIcon60@3x.png */,
+				3C7902486C5EA33FDC49DF5A /* AppIconLayers */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		3C7902486C5EA33FDC49DF5A /* AppIconLayers */ = {
+			isa = PBXGroup;
+			children = (
+				BD4B36FA353CF009DCCE6ED6 /* 01_Background_Dark.svg */,
+				583A42875F2B015DF25334AB /* 01_Background.svg */,
+				38118D2B0BE3830EF99339AB /* 02_Horizon.svg */,
+				8670B5AFC7C49F61C2F097B4 /* 03_LighthouseTower.svg */,
+				BFB2FCD9D93C6E9E93EDFC48 /* 04_LighthouseStar.svg */,
+				0FBB496B17AB3363EB2477B6 /* 05_OrientationCorona.svg */,
+				C775C3CD1F40A348FBC8502E /* 06_Elements_Dark.svg */,
+			);
+			path = AppIconLayers;
 			sourceTree = "<group>";
 		};
 		5F02AC32925040A73C46DC34 /* Products */ = {
@@ -122,14 +161,27 @@
 			isa = PBXGroup;
 			children = (
 				CD95C8F3A2A405DEF8270F75 /* LumeProtocolTests.swift */,
+				9A4BEBF819005878AD70654C /* TodayTests.swift */,
 			);
 			path = LumeTests;
+			sourceTree = "<group>";
+		};
+		E3B282A61EF8AFD6CD9A6E18 /* Today */ = {
+			isa = PBXGroup;
+			children = (
+				43EE9D5FF26F7268D4562457 /* TodayEntry.swift */,
+				6F263DB6C70F5C5EB2E80148 /* TodayProjection.swift */,
+				9766F1472B5B31F05E3C143A /* TodayStore.swift */,
+				2C5B9C52E9C3FF4BF88220FD /* TodayView.swift */,
+			);
+			path = Today;
 			sourceTree = "<group>";
 		};
 		F44BA776020BB8AB72CDD3FB /* Features */ = {
 			isa = PBXGroup;
 			children = (
 				F79D1C91925DD4322EABF5BF /* Priorities */,
+				E3B282A61EF8AFD6CD9A6E18 /* Today */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -227,6 +279,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B89D069AA031EA93CCC417B8 /* 01_Background.svg in Resources */,
+				BD2FD25E660A2BB23CF6C18B /* 01_Background_Dark.svg in Resources */,
+				C90C84CF726D4CAEA7C005EF /* 02_Horizon.svg in Resources */,
+				067365BA1450DECE081E017D /* 03_LighthouseTower.svg in Resources */,
+				0FA89CA94A729693353CA4FD /* 04_LighthouseStar.svg in Resources */,
+				C1289C304962366AE04CB9E1 /* 05_OrientationCorona.svg in Resources */,
+				2048B3BCD12AE93852471B45 /* 06_Elements_Dark.svg in Resources */,
 				AB880CDD6932AE4B2F0910B6 /* AppIcon60@2x.png in Resources */,
 				F333F92FD5EDD90663149C76 /* AppIcon60@3x.png in Resources */,
 			);
@@ -249,6 +308,10 @@
 				49F26354885BDABBD8458F1D /* PrioritiesView.swift in Sources */,
 				4E9835D5AC7F23EBF14A06BD /* PriorityItem.swift in Sources */,
 				D9FCC0240675D289D119718A /* RootView.swift in Sources */,
+				DABB8F971B825F8E7C760509 /* TodayEntry.swift in Sources */,
+				151D117B8755B07FEA046BB4 /* TodayProjection.swift in Sources */,
+				E11B3D15EDE59D20C802AAC1 /* TodayStore.swift in Sources */,
+				7E60D308DB208FE63C441695 /* TodayView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -257,6 +320,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4105FA5165E067D37AEF8608 /* LumeProtocolTests.swift in Sources */,
+				E3F77332A9BC83A22902FC55 /* TodayTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

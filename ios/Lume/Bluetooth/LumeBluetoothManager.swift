@@ -27,6 +27,7 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     @Published private(set) var lastError: String?
 
     private let priorities: PrioritiesStore
+    private let today: TodayStore
     private let defaults: UserDefaults
     private let lastPeripheralKey = "lume.lastPeripheralIdentifier.v2"
 
@@ -54,8 +55,13 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     private let cardWriteUUID = CBUUID(string: LumeProtocol.cardWriteUUID)
     private let actionNotifyUUID = CBUUID(string: LumeProtocol.actionNotifyUUID)
 
-    init(priorities: PrioritiesStore, defaults: UserDefaults = .standard) {
+    init(
+        priorities: PrioritiesStore,
+        today: TodayStore,
+        defaults: UserDefaults = .standard
+    ) {
         self.priorities = priorities
+        self.today = today
         self.defaults = defaults
         super.init()
         central = CBCentralManager(
@@ -75,6 +81,13 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
         }
         guard connectedPeripheral == nil else { return }
         restoreOrScan()
+    }
+
+    func syncToday() {
+        Task {
+            await today.refreshIfAuthorized()
+            sendToday()
+        }
     }
 
     func connect() {
@@ -184,6 +197,20 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
                 maximumPayloadBytes: maximum
             )
             enqueue(payloads, marksLastAsSynced: true)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func sendToday() {
+        guard let peripheral = connectedPeripheral else { return }
+        do {
+            let maximum = peripheral.maximumWriteValueLength(for: .withResponse)
+            let payload = try LumeProtocol.makeTodaySnapshot(
+                entries: today.entries,
+                maximumPayloadBytes: maximum
+            )
+            enqueue([payload], marksLastAsSynced: true)
         } catch {
             lastError = error.localizedDescription
         }
@@ -305,6 +332,8 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
             break
         case "priorities.sync.request":
             sendPriorities()
+        case "today.sync.request":
+            syncToday()
         case "priority.toggle":
             guard let id = action.id, let done = action.done else { return }
             priorities.setDone(id: id, done: done)

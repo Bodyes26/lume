@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var bluetooth: LumeBluetoothManager
     @ObservedObject var priorities: PrioritiesStore
+    @ObservedObject var today: TodayStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -14,6 +15,12 @@ struct RootView: View {
                     brandHeader
                     ConnectionStatusView(bluetooth: bluetooth)
                     Divider().overlay(LumeTheme.hairline)
+                    TodayView(
+                        store: today,
+                        isDeviceReady: bluetooth.phase.isReady,
+                        onSync: bluetooth.syncToday
+                    )
+                    Divider().overlay(LumeTheme.hairline)
                     PrioritiesView(store: priorities, isDeviceReady: bluetooth.phase.isReady)
                 }
                 .padding(.horizontal, LumeSpace.medium)
@@ -24,9 +31,14 @@ struct RootView: View {
         }
         .tint(LumeTheme.light)
         .foregroundStyle(LumeTheme.ink)
-        .onAppear { bluetooth.start() }
+        .onAppear {
+            bluetooth.start()
+            Task { await today.refreshIfAuthorized() }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { bluetooth.start() }
+            guard phase == .active else { return }
+            bluetooth.start()
+            Task { await today.refreshIfAuthorized() }
         }
         .sensoryFeedback(.success, trigger: bluetooth.phase.isReady)
     }

@@ -18,11 +18,15 @@ let package = Package(
                 "Design",
                 "Features/Priorities/PrioritiesStore.swift",
                 "Features/Priorities/PrioritiesView.swift",
+                "Features/Today/TodayStore.swift",
+                "Features/Today/TodayView.swift",
                 "Resources"
             ],
             sources: [
                 "Bluetooth/LumeProtocol.swift",
-                "Features/Priorities/PriorityItem.swift"
+                "Features/Priorities/PriorityItem.swift",
+                "Features/Today/TodayEntry.swift",
+                "Features/Today/TodayProjection.swift"
             ]
         ),
         .testTarget(

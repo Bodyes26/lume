@@ -9,7 +9,8 @@ struct LumeApp: App {
         WindowGroup {
             RootView(
                 bluetooth: model.bluetooth,
-                priorities: model.priorities
+                priorities: model.priorities,
+                today: model.today
             )
         }
     }
