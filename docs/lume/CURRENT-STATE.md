@@ -18,7 +18,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Build Lume X3-only | **VERIFICATA** | `lume-x3`: SUCCESS; flash 2.526.151 B, RAM 144.988 B |
 | Identità a compile time | **VERIFICATA** | stringhe, UUID preservati, asset/env/release compilano |
 | Boot e resa sul vetro | **PARZIALE, POSITIVA** | flash verificato; Maurizio ha osservato `lume` nel lockup superiore |
-| BLE/ANCS reale | **PARZIALE, POSITIVA** | il monitor ha ricevuto e renderizzato una notifica WhatsApp; nome advertising non ancora scandito |
+| BLE/ANCS reale | **VERIFICATA** | nome advertising `Lume X3` confermato da Maurizio; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **NON INIZIATA** | è v0.2; l'app originale non è nel repository |
 
 ## Cosa è stato implementato in v0.1
@@ -131,7 +131,7 @@ Checklist di accettazione:
 - [ ] Settings mostra `Lume 0.1.0-dev (X3)`;
 - [ ] About mostra `About Lume` e pannello `xteink_x3` 528×792 logici;
 - [ ] sleep senza priorità mostra `lume`; dormant priorities mostra `lume` nel footer;
-- [ ] scan Bluetooth vede il nome advertising `Lume X3`;
+- [x] scan Bluetooth vede il nome advertising `Lume X3` (confermato da Maurizio);
 - [ ] reader apre un EPUB già presente e gira almeno una pagina;
 - [ ] riavvio e wake non perdono settings/posizione (namespace NVS preservato).
 
