@@ -4,6 +4,7 @@
 **Versione firmware:** `0.1.0-dev`  
 **Versione app iOS:** `0.2.0-dev`  
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
+**Commit vertical slice v0.2:** `75639a3`  
 **Fase:** firmware v0.1 accettato; primo vertical slice dell'app iOS v0.2 implementato e verificato in Simulator.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
