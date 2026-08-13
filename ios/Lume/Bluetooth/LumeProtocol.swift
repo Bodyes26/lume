@@ -23,9 +23,9 @@ enum LumeProtocolError: LocalizedError, Equatable {
 }
 
 enum LumeProtocol {
-    static let serviceUUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-    static let cardWriteUUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-    static let actionNotifyUUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+    static let serviceUUID = "F39F34A5-7DDD-487B-85B6-CE7695466BAE"
+    static let cardWriteUUID = "F6361620-0F61-40E9-AA80-5252733C5416"
+    static let actionNotifyUUID = "F626E419-C6A8-4048-B684-98C4604D19A3"
     static let schemaVersion = 1
     static let maximumCardBytes = 512
     static let maximumPriorityItems = 10

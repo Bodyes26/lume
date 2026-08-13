@@ -15,13 +15,14 @@
 #include <string>
 
 namespace CompanionProtocol {
-// Human-visible identity. The iOS app discovers/reconnects by SERVICE_UUID
-// (BluetoothManager.swift:101 scanForPeripherals(withServices:)), not by
-// name; UUIDs and JSON schema stay compatible with the upstream protocol.
+// Human-visible identity. Lume discovers/reconnects by its private
+// SERVICE_UUID, not by name. Dedicated UUIDs isolate this fork from the
+// upstream Flowe app: both apps otherwise answer the same sync request and
+// the last snapshot silently wins.
 constexpr const char* deviceName() { return "Lume X3"; }
-constexpr const char* SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
-constexpr const char* CARD_WRITE_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
-constexpr const char* ACTION_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+constexpr const char* SERVICE_UUID = "F39F34A5-7DDD-487B-85B6-CE7695466BAE";
+constexpr const char* CARD_WRITE_UUID = "F6361620-0F61-40E9-AA80-5252733C5416";
+constexpr const char* ACTION_NOTIFY_UUID = "F626E419-C6A8-4048-B684-98C4604D19A3";
 
 constexpr std::size_t MAX_ACTIONS = 4;
 constexpr std::size_t MAX_TODAY_ITEMS = 6;

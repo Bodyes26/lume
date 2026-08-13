@@ -118,7 +118,7 @@ Un fork che ridistribuisce **binari** deve comunque veicolare le licenze MIT/Apa
 | Cosa | File:riga | Nota |
 |---|---|---|
 | Nome BLE annunciato | `src/ble/CompanionProtocol.h:25` — `"xphone X3"` / `"xphone X4"` | usato in `BLEDevice::init` (`src/ble/CompanionBleService.cpp:187`), scan response (`:262`), stringa di stato "Advertising as …" (`:342`) |
-| UUID servizio/caratteristiche | `src/ble/CompanionProtocol.h:26-28` | **non toccare** se si vuole riusare un'app companion esistente: l'app scopre per SERVICE_UUID, non per nome |
+| UUID servizio/caratteristiche | `src/ble/CompanionProtocol.h:22-24` | Lume usa UUID propri, replicati in `ios/Lume/Bluetooth/LumeProtocol.swift`, per evitare che la vecchia app Flowe risponda agli stessi comandi e sovrascriva gli snapshot |
 | Logo boot (bitmap 120×120, 1bpp) | `src/art/FloweLogo.h:9-12` | blitter `src/main.cpp:76-84`, posizionamento `:90` |
 | Wordmark splash | `src/main.cpp:91` — `drawTextCentered(kFontBold, cx, wordmarkY, "flowe")` | |
 | Wordmark status bar launcher | `src/scenes/LauncherScene.cpp:173` — `drawText(kFontBold, …, "flowe")` | sole + wordmark, commento `:158-161` |

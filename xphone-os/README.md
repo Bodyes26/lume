@@ -211,11 +211,12 @@ scene/launcher code. The ~4.3KB RAM gap between envs is the framebuffer
 
 ## M2 — BLE companion + ANCS rails
 
-**Scope.** The launcher now runs a BLE stack after its first paint ("UI
-first, radios second"): the same **X4 Companion** GATT service as x4-os
-(service `6E400001-…CA9E`, card write `…0002`, action notify `…0003`, same
-card/command JSON — the existing iOS companion app connects unchanged;
-camera image transfer is the one thing stripped), plus an **ANCS client**
+**Historical scope.** Upstream originally started the BLE stack after the first
+paint and reused the X4 Companion GATT UUIDs, so its existing iOS app connected
+unchanged. Current Lume keeps the card/command JSON schema but uses dedicated
+service/characteristic UUIDs and a distinct BLE identity; see
+`../docs/lume/03-protocollo-ble.md`. Camera image transfer remains stripped. The
+firmware also runs an **ANCS client**
 (`src/ble/`, ported from x4-os `src/companion/`) that turns the X4 into an
 iPhone notification receiver. Completed notifications land in a bounded
 `NotificationStore`; the **Notifications** app renders them newest-first

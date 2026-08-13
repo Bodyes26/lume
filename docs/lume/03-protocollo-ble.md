@@ -5,10 +5,11 @@ Tutti i riferimenti sono al modulo firmware `xphone-os/`. Percorsi abbreviati:
 canale card/command e **GATT client** verso ANCS sull'iPhone. Il companion Lume
 implementato è in `ios/`.
 
-> **Delta Lume v0.2:** il device è solo X3 e si annuncia come `Lume X3`.
-> `SERVICE_UUID`, caratteristiche, schema JSON e limiti restano wire-compatible;
-> l'app scansiona per UUID, mai per nome. Il canale GATT richiede ora il link
-> cifrato.
+> **Delta Lume v0.2:** il device è solo X3, si annuncia come `Lume X3` e usa
+> UUID GATT propri. Il payload JSON e i limiti restano compatibili, ma l'isolamento
+> impedisce alla vecchia app Flowe di rispondere alle richieste Lume e
+> sovrascriverne lo snapshot. L'app scansiona per UUID, mai per nome. Il canale
+> GATT richiede il link cifrato.
 
 File sorgente rilevanti: `src/ble/CompanionProtocol.h` (UUID + limiti), `src/ble/CompanionBleService.{h,cpp}` (peripheral, parser card, comandi in uscita), `src/ble/CompanionAncsClient.{h,cpp}` (ANCS), `src/CompanionSync.{h,cpp}` (registry resync per scena), `src/NotificationStore.*`, `src/NotificationFilter.*`, store consumer `src/{PrioritiesStore,TodayStore,WorkoutStore,BlockStatusStore,ClockStore}.*`.
 
@@ -16,15 +17,16 @@ File sorgente rilevanti: `src/ble/CompanionProtocol.h` (UUID + limiti), `src/ble
 
 | Elemento | Valore | Evidenza |
 |---|---|---|
-| Local Name (Complete) | `Lume X3` | `src/ble/CompanionProtocol.h:19-25` |
-| Nome: limite | scartato se vuoto o >29 caratteri | `src/ble/CompanionBleService.cpp:75-82` |
-| ADV packet | Flags `0x01` = LE General Disc + BR/EDR not supported (3 B) + **Service Solicitation 128-bit** (`0x15`) con l'UUID ANCS `7905F431-B5CE-4E99-A40F-4B1E122D00D0` (18 B) = 21 B | `:53-73`, `:250-258` |
-| SCAN RESPONSE | Complete List of 128-bit Service UUID = `SERVICE_UUID` (18 B) + Complete Local Name (11 B) = 29 B | `:260-263` |
+| Local Name (Complete) | `Lume X3` | `src/ble/CompanionProtocol.h:22` |
+| Identità BLE | random-static `D2:<40 bit bassi del MAC BT hardware>`; stabile per device e diversa dall'identità pubblica upstream | `src/ble/CompanionBleService.cpp`, `configureLumeBleIdentity()` |
+| Nome: limite | scartato se vuoto o >29 caratteri | `src/ble/CompanionBleService.cpp`, `addCompleteName()` |
+| ADV packet | Flags `0x01` = LE General Disc + BR/EDR not supported (3 B) + **Service Solicitation 128-bit** (`0x15`) con l'UUID ANCS `7905F431-B5CE-4E99-A40F-4B1E122D00D0` (18 B) = 21 B | `addFlags()`, `addAncsSolicitation()` |
+| SCAN RESPONSE | Complete List of 128-bit Service UUID = `SERVICE_UUID` (18 B) + Complete Local Name (11 B) = 29 B | `CompanionBleService::begin()` |
 | Appearance / Manufacturer Data / TX Power | **non presenti nel codice** | — |
-| Intervalli ADV | Fast 48–96 unità 0,625 ms = **30–60 ms** per 60 000 ms dopo boot o dopo ogni disconnessione; poi Slow 640–800 = **400–500 ms** a tempo indeterminato | `:46-51`, `:313-335`, `:544-554` |
-| Hint intervallo di connessione | `setMinPreferred(0x06)` / `setMaxPreferred(0x12)` (7,5–22,5 ms) | `:269-270` |
+| Intervalli ADV | Fast 48–96 unità 0,625 ms = **30–60 ms** per 60 000 ms dopo boot o dopo ogni disconnessione; poi Slow 640–800 = **400–500 ms** a tempo indeterminato | `applyAdvIntervals()`, `startAdvertising()` |
+| Hint intervallo di connessione | `setMinPreferred(0x06)` / `setMaxPreferred(0x12)` (7,5–22,5 ms) | `CompanionBleService::begin()` |
 
-**Conseguenza per iOS:** l'app **deve** scansionare/riconnettere per `SERVICE_UUID`, non per nome (il nome sta solo nella scan response, l'UUID pure). La solicitation ANCS serve a far comparire il device come accessorio “notification-capable” e ad abilitare il riaggancio in background dei bond.
+**Conseguenza per iOS:** l'app **deve** scansionare/riconnettere per `SERVICE_UUID`, non per nome. UUID GATT e identità BLE sono entrambi dedicati: i soli UUID non isolano un iPhone già associato, perché CoreBluetooth può ripristinare il vecchio peripheral e riusare handle in cache. La solicitation ANCS abilita il riaggancio in background del bond Lume.
 
 Il radio si accende **dopo** il primo paint della launcher (`src/main.cpp:300-307`); se il boot ripristina la scena Reader, BLE **non parte affatto** finché non si esce dal reader (`src/main.cpp:300-301`). Reader: BLE spento e ri-inizializzato all'uscita (`src/ble/CompanionBleService.h:57-58`); File Transfer: stack distrutto e memoria rilasciata fino al riavvio (`src/ble/CompanionBleService.h:45-50`).
 
@@ -47,11 +49,11 @@ Il radio si accende **dopo** il primo paint della launcher (`src/main.cpp:300-30
 
 | Caratteristica | UUID | Proprietà | Direzione | Payload |
 |---|---|---|---|---|
-| Service | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` | — | — | — |
-| Card Write | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` | `WRITE`, `WRITE_NR`, `WRITE_ENC` | phone → device | JSON UTF-8, una card per write |
-| Action Notify | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` | `READ`, `NOTIFY`, `READ_ENC` | device → phone | JSON UTF-8, un messaggio per notify |
+| Service | `F39F34A5-7DDD-487B-85B6-CE7695466BAE` | — | — | — |
+| Card Write | `F6361620-0F61-40E9-AA80-5252733C5416` | `WRITE`, `WRITE_NR`, `WRITE_ENC` | phone → device | JSON UTF-8, una card per write |
+| Action Notify | `F626E419-C6A8-4048-B684-98C4604D19A3` | `READ`, `NOTIFY`, `READ_ENC` | device → phone | JSON UTF-8, un messaggio per notify |
 
-Fonte: `src/ble/CompanionProtocol.h:26-28`, `src/ble/CompanionBleService.cpp:226-245`. Valore iniziale leggibile della Action: `{"schemaVersion":1,"type":"ready"}` (`:245`).
+Fonte: `src/ble/CompanionProtocol.h:23-25`, `src/ble/CompanionBleService.cpp`, `CompanionBleService::begin()`. Valore iniziale leggibile della Action: `{"schemaVersion":1,"type":"ready"}`.
 
 ### Limiti, framing, errori sull'ingresso
 
@@ -196,10 +198,10 @@ Il telefono **non** deve pushare snapshot spontanee: il device chiede, il telefo
 ```mermaid
 sequenceDiagram
     participant iOS as App iOS
-    participant Dev as Flowe OS
+    participant Dev as Lume OS
     Dev->>iOS: ADV (Flags + ANCS solicitation) / SCAN RSP (SERVICE_UUID + name)
-    iOS->>Dev: connect + discover 6E400001 service
-    iOS->>Dev: subscribe 6E400003 (Action Notify)
+    iOS->>Dev: connect + discover F39F34A5 service
+    iOS->>Dev: subscribe F626E419 (Action Notify)
     Dev->>iOS: ble_gap_security_initiate (dopo 600 ms)
     iOS-->>Dev: pairing Just Works, link cifrato e bonded
     Dev->>iOS: GATT client: discover ANCS 7905F431

@@ -52,7 +52,7 @@ Spec: [03-protocollo-ble.md](03-protocollo-ble.md). Con **account Apple gratuito
 firma valida 7 giorni, `EventKit` e `bluetooth-central` funzionano, Screen Time no.
 
 App:
-1. [x] `CBCentralManager`, scan **per `SERVICE_UUID`** (`6E400001-…CA9E`),
+1. [x] `CBCentralManager`, scan **per `SERVICE_UUID`** Lume (`F39F34A5-…-6BAE`),
    connessione/restoration e subscribe Action Notify prima di scrivere.
 2. [x] `Info.plist`: `NSBluetoothAlwaysUsageDescription`,
    `UIBackgroundModes = [bluetooth-central]` e restore identifier.
@@ -60,15 +60,15 @@ App:
    `minutesIntoDay`).
 4. [x] Priorities locale + `priorities.snapshot` (≤10 item, ≤512 B,
    split `part`/`parts`) + consumo di `priority.toggle`.
-5. [ ] Prova end-to-end su iPhone/X3: serve Xcode compatibile con iOS 27 e
-   provisioning profile per `com.maurizio.lume`.
+5. [x] Prova end-to-end su iPhone 16 Pro/iOS 27: pairing, `time.sync`,
+   snapshot Priorities, toggle X3→iPhone e reconnect dopo reinstallazione.
 
 Firmware:
 * [x] Gate GATT cifrato per Card Write e Action Read/Notify.
 * [x] Resync ANCS sticky durante reconnect/discovery, con retry di subscribe.
 * [x] Timeout app di 8 secondi sulle write, con reconnect automatico.
-* [ ] Prova hardware del firmware hardenizzato (l'X3 non era collegato durante
-  questo build).
+* [x] Prova hardware del firmware hardenizzato e identità BLE Lume isolata
+  dall'app upstream ancora installata.
 
 *Prova di accettazione*: priorità create sul telefono che compaiono sul vetro e
 si spuntano col tasto, poi reconnect senza riavviare l'app.

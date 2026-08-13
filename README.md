@@ -74,8 +74,8 @@ The reader itself needs no companion app.
 The native app lives in `ios/`. It targets iOS 17+, stores up to ten priorities
 locally, reconnects to the last X3 through CoreBluetooth state restoration, and
 serializes every GATT write with a response and an 8-second recovery timeout.
-The firmware service UUID remains upstream-compatible; the user-visible device
-name is `Lume X3`.
+Lume uses dedicated GATT UUIDs and a deterministic random-static BLE identity,
+so the upstream Flowe app can remain installed without answering Lume sync requests.
 
 Generate, build and test it with:
 
@@ -88,9 +88,9 @@ swift test
 ```
 
 Installing on an iPhone requires an Apple account selected for team
-`PRF667R7JB` in Xcode and an automatically generated development provisioning
-profile for `com.maurizio.lume`. The Simulator validates the visual shell but
-cannot exercise CoreBluetooth.
+`XTU68E98BM` in Xcode and an automatically generated development provisioning
+profile for `com.maurizio.lume`. The physical iPhone 16 Pro/iOS 27 path is
+hardware-verified; the Simulator validates the visual shell but not CoreBluetooth.
 
 ## Performance
 

@@ -86,8 +86,8 @@ xcodebuild build -project Lume.xcodeproj -target Lume \
 swift test
 ```
 
-Per il device reale selezionare in Xcode il team `PRF667R7JB`; l'iPhone di
-Maurizio usa iOS 27 e richiede una versione Xcode compatibile.
+Per il device reale il progetto usa il team `XTU68E98BM`; l'iPhone 16 Pro di
+Maurizio usa iOS 27 e la build firmata è verificata con `/Applications/Xcode-beta.app`.
 
 Prima di flashare, verificare che il cavo pogo sia quello dati a 4 pin. Non usare
 comandi distruttivi sulla SD e non inizializzare il display finché il guard X3 non ha

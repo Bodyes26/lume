@@ -12,6 +12,7 @@
 #include <BLEDevice.h>
 #include <BLESecurity.h>
 #include <BLEServer.h>
+#include <esp_mac.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -52,6 +53,26 @@ constexpr uint32_t kAdvFastWindowMs = 60000;
 
 constexpr uint8_t BLE_AD_TYPE_FLAGS = 0x01;
 constexpr uint8_t BLE_AD_TYPE_SOL_SRV_UUID128 = 0x15;  // Service Solicitation, 128-bit
+
+// Preserve the factory-derived low 40 bits so nearby Lume devices remain
+// unique, but use a random-static OUI distinct from the upstream public
+// identity. This gives CoreBluetooth a new peripheral identity; changing only
+// service UUIDs is insufficient because iOS apps can retain cached handles.
+bool configureLumeBleIdentity() {
+  uint8_t address[6];
+  if (esp_read_mac(address, ESP_MAC_BT) != ESP_OK) {
+    LOG_ERR("X4CMP", "BLE factory address unavailable");
+    return false;
+  }
+  address[0] = 0xd2;  // top two bits set: valid random-static address
+  BLEAddress lumeAddress(address, BLE_ADDR_RANDOM);
+  if (!BLEDevice::setOwnAddr(lumeAddress) || !BLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM)) {
+    LOG_ERR("X4CMP", "Lume BLE identity setup failed");
+    return false;
+  }
+  LOG_INF("X4CMP", "BLE identity %s (random static)", lumeAddress.toString().c_str());
+  return true;
+}
 
 void addFlags(BLEAdvertisementData& data) {
   const char payload[] = {2, BLE_AD_TYPE_FLAGS,
@@ -185,6 +206,10 @@ void CompanionBleService::begin() {
 
   LOG_INF("X4CMP", "Starting BLE companion service");
   BLEDevice::init(CompanionProtocol::deviceName());
+  if (!configureLumeBleIdentity()) {
+    BLEDevice::deinit(false);
+    return;
+  }
   BLEDevice::setMTU(517);
 
   // Bonding + Secure Connections, no MITM/IO — same security config as

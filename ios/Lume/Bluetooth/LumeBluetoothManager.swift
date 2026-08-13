@@ -28,7 +28,7 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
 
     private let priorities: PrioritiesStore
     private let defaults: UserDefaults
-    private let lastPeripheralKey = "lume.lastPeripheralIdentifier"
+    private let lastPeripheralKey = "lume.lastPeripheralIdentifier.v2"
 
     private var central: CBCentralManager!
     private var nearbyPeripheral: CBPeripheral?
@@ -63,7 +63,7 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
             queue: .main,
             options: [
                 CBCentralManagerOptionShowPowerAlertKey: true,
-                CBCentralManagerOptionRestoreIdentifierKey: "com.maurizio.lume.central"
+                CBCentralManagerOptionRestoreIdentifierKey: "com.maurizio.lume.central.v2"
             ]
         )
     }
@@ -100,16 +100,31 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     }
 
     private func restoreOrScan() {
+        if let peripheral = central.retrieveConnectedPeripherals(withServices: [serviceUUID]).first {
+            nearbyPeripheral = peripheral
+            if peripheral.state == .connected {
+                prepare(peripheral)
+            } else {
+                connect()
+            }
+            return
+        }
+
         if
             let rawIdentifier = defaults.string(forKey: lastPeripheralKey),
             let identifier = UUID(uuidString: rawIdentifier),
             let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first
         {
             nearbyPeripheral = peripheral
-            connect()
-        } else {
-            startScanning()
+            if peripheral.state == .connected {
+                prepare(peripheral)
+            } else {
+                connect()
+            }
+            return
         }
+
+        startScanning()
     }
 
     private func startScanning() {
@@ -220,6 +235,41 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
             central.cancelPeripheralConnection(peripheral)
         }
     }
+    private func subscribeToActions(
+        peripheral: CBPeripheral,
+        characteristic: CBCharacteristic,
+        afterSeconds: Int = 0
+    ) {
+        notificationRetryTask = Task { @MainActor [weak self, weak peripheral, weak characteristic] in
+            if afterSeconds > 0 {
+                try? await Task.sleep(for: .seconds(afterSeconds))
+            }
+            guard
+                !Task.isCancelled,
+                let self,
+                let peripheral,
+                let characteristic,
+                self.connectedPeripheral === peripheral
+            else { return }
+
+            peripheral.setNotifyValue(true, for: characteristic)
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled, !characteristic.isNotifying else { return }
+
+            guard self.notificationRetryCount < 3 else {
+                self.fail("L’X3 non ha attivato il canale di sincronizzazione.")
+                return
+            }
+            self.notificationRetryCount += 1
+            self.phase = .preparing(peripheral.name ?? "Lume X3")
+            self.subscribeToActions(
+                peripheral: peripheral,
+                characteristic: characteristic,
+                afterSeconds: 1
+            )
+        }
+    }
+
     private func retryEncryptedSubscription(
         peripheral: CBPeripheral,
         characteristic: CBCharacteristic,
@@ -237,19 +287,13 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
         else { return false }
 
         notificationRetryCount += 1
-        phase = .preparing("Completa il pairing con Lume X3…")
+        phase = .preparing(peripheral.name ?? "Lume X3")
         notificationRetryTask?.cancel()
-        notificationRetryTask = Task { @MainActor [weak self, weak peripheral, weak characteristic] in
-            try? await Task.sleep(for: .seconds(2))
-            guard
-                !Task.isCancelled,
-                let self,
-                let peripheral,
-                let characteristic,
-                self.connectedPeripheral === peripheral
-            else { return }
-            peripheral.setNotifyValue(true, for: characteristic)
-        }
+        subscribeToActions(
+            peripheral: peripheral,
+            characteristic: characteristic,
+            afterSeconds: 2
+        )
         return true
     }
 
@@ -392,7 +436,6 @@ extension LumeBluetoothManager: @preconcurrency CBPeripheralDelegate {
                 cardWriteCharacteristic = characteristic
             case actionNotifyUUID:
                 actionNotifyCharacteristic = characteristic
-                peripheral.setNotifyValue(true, for: characteristic)
             default:
                 break
             }
@@ -401,6 +444,10 @@ extension LumeBluetoothManager: @preconcurrency CBPeripheralDelegate {
             fail("Canali di sincronizzazione Lume incompleti.")
             return
         }
+        guard let actionNotifyCharacteristic else { return }
+        notificationRetryTask?.cancel()
+        notificationRetryCount = 0
+        subscribeToActions(peripheral: peripheral, characteristic: actionNotifyCharacteristic)
         becomeReady()
     }
 
@@ -418,6 +465,19 @@ extension LumeBluetoothManager: @preconcurrency CBPeripheralDelegate {
         }
         notificationRetryTask?.cancel()
         notificationRetryTask = nil
+        guard characteristic.isNotifying else {
+            if notificationRetryCount < 3 {
+                notificationRetryCount += 1
+                subscribeToActions(
+                    peripheral: peripheral,
+                    characteristic: characteristic,
+                    afterSeconds: 1
+                )
+            } else {
+                fail("L’X3 non ha attivato il canale di sincronizzazione.")
+            }
+            return
+        }
         notificationRetryCount = 0
         becomeReady()
     }
