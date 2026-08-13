@@ -248,7 +248,7 @@ Due strade, con un vincolo hardware decisivo:
 
 | Feature | Complessità | File principali | Prerequisiti |
 |---|---|---|---|
-| i18n IT/EN a compile time | **implementata; hardware visuale pendente** | `src/LumeLocale.h`, `src/scenes/*.cpp`, `Scene.cpp`, `Sleep.cpp`, `main.cpp`, `platformio.ini`, workflow release | build `lume-x3-it/en`; token protocollo lasciati canonici; app responsabile dei campi già formattati |
+| i18n IT/EN a compile time | **implementata e verificata su X3** | `src/LumeLocale.h`, `src/scenes/*.cpp`, `Scene.cpp`, `Sleep.cpp`, `main.cpp`, `platformio.ini`, workflow release | build `lume-x3-it/en`; smoke test italiano sul vetro superato; token protocollo lasciati canonici; app responsabile dei campi già formattati |
 | Font UI con nuovi range (€, altri) | media | nuovo `fontconvert` non compresso; `tools/subset_epd_font.py:42`; `src/fonts/*`, `Fonts.cpp` | tool di generazione (assente in repo) |
 | Font reader aggiuntivi (flash) | media | nuovo `fontconvert` 2bpp+DEFLATE; `reader/ReaderFonts.{h,cpp}`, `ReaderScene.cpp:645-656`, `:76` | ~50-80 KB flash per stile-misura; consapevolezza che `fontId` è chiave cache `section.bin` |
 | Font reader da SD a runtime | alta | `FontDecompressor.{h,cpp}`, `EpdFont.cpp`, nuovo `SdCardFont` | sorgente inflate streaming da file; budget RAM (max gruppo 38 KB + tabella glifi 17 KB) |

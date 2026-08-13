@@ -78,7 +78,7 @@ si spuntano col tasto; agenda reale che appare in Today; reconnect senza riavvia
 l'app. Tutti e tre i percorsi sono verificati su hardware.
 
 ## v0.3 — Italiano completo a compile time
-**Stato:** implementazione e build completate; verifica visiva su X3 pendente.
+**Stato:** completata e verificata sull'X3.
 
 Decisione aggiornata: niente switcher runtime. Il firmware produce due immagini,
 `lume-x3-it` (default) e `lume-x3-en`; `L10N()` seleziona un solo letterale nel
@@ -96,9 +96,9 @@ Completato:
 * build 2/2 `SUCCESS`, immagini ESP32-C3 valide e ricerca byte che prova
   l'assenza della lingua non selezionata.
 
-*Prova residua*: flashare `lume-x3-it` e controllare sul vetro tab, righe lunghe,
-stati vuoti e glifi accentati. Dettagli in
-[13-personalizzazione-e-i18n.md](13-personalizzazione-e-i18n.md).
+*Prova di accettazione*: `lume-x3-it` caricato via USB; launcher, Impostazioni,
+una scena applicativa, soft-key, accenti e layout confermati corretti sul vetro.
+Dettagli in [CURRENT-STATE.md](CURRENT-STATE.md).
 
 ## v0.4 — Orologio vero (DS3231)
 

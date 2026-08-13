@@ -96,5 +96,5 @@ comandi distruttivi sulla SD e non inizializzare il display finché il guard X3 
 confermato l'hardware.
 
 La localizzazione firmware è a compile time: italiano `lume-x3-it` (default),
-inglese `lume-x3-en`. Le build e l'isolamento delle stringhe nei due binari sono
-verificati; la revisione visiva italiana sul vero X3 è ancora pendente.
+inglese `lume-x3-en`. Build e isolamento dei due binari sono verificati; il
+firmware italiano è stato flashato e validato visivamente sul vero X3.

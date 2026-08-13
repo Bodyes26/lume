@@ -6,7 +6,7 @@
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
-**Fase:** localizzazione firmware IT/EN compilata e isolata; verifica visiva italiana su X3 pendente.
+**Fase:** localizzazione firmware IT/EN completata; build, isolamento e smoke test italiano su X3 verificati.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -20,7 +20,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Build upstream di riferimento | **VERIFICATA** | `xteink` prima delle modifiche: SUCCESS; flash 2.532.155 B, RAM 145.004 B |
 | Build Lume X3 localizzate | **VERIFICATA** | IT: RAM 144.996 B, flash 2.529.849 B, bin 2.542.384 B; EN: RAM 144.996 B, flash 2.529.125 B, bin 2.541.664 B |
 | Identità a compile time | **VERIFICATA** | stringhe, UUID GATT Lume, identità BLE random-static, asset/env/release compilano |
-| Localizzazione firmware | **BUILD VERIFICATA; VETRO PENDENTE** | `lume-x3-it/en`; scene, chrome, diagnostica BLE/ANCS e pairing sono localizzati; ogni binario contiene solo la propria lingua; X3 non collegato durante l'ultima sessione |
+| Localizzazione firmware | **VERIFICATA SU HARDWARE** | `lume-x3-it` caricato via USB sull'X3; boot, launcher, Impostazioni, una scena applicativa, soft-key e glifi accentati confermati corretti dall'utente; `lume-x3-en` verificato a build e isolamento binario |
 | Boot e resa sul vetro pre-i18n | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo prima della localizzazione |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
@@ -156,6 +156,26 @@ Confronto col build upstream dual X3/X4 eseguito prima del fork:
 I warning rimasti sono ereditati (SdFat/FS macro, JPEGDEC/PNGdec macro,
 `NetworkClient::flush` deprecato), non introdotti dalla localizzazione.
 
+## Prova hardware localizzazione italiana — completata
+
+Il firmware `lume-x3-it` è stato caricato via USB su
+`/dev/cu.usbmodem11101`. Esptool ha identificato ESP32-C3 revision v0.4,
+flash da 16 MB e ha verificato l'hash di ogni regione scritta. Dopo il riavvio
+il monitor seriale ha osservato il collegamento BLE cifrato e bonded:
+
+```text
+[I][ANCS] Requested low-duty conn params: 90-180 ms, latency=4, timeout=2000 ms
+[I][X4CMP] BLE authentication complete conn=1 encrypted=1 bonded=1
+[I][X4CMP] BLE link encrypted bonded=1
+```
+
+Sul vetro Maurizio ha confermato:
+
+- launcher Lume italiano corretto;
+- titoli delle sei app leggibili;
+- Impostazioni e una scena applicativa navigabili;
+- soft-key, accenti e layout senza difetti visibili.
+
 ## Prova hardware v0.1 — completata
 
 Il 13/08/2026 PlatformIO ha rilevato l'X3 su `/dev/cu.usbmodem11101`:
@@ -228,13 +248,11 @@ Verifiche automatiche: `swift test` con **7/7 PASS** (4 protocollo esistenti +
 
 ## Prossime azioni
 
-1. Collegare l'X3, flashare `lume-x3-it` e verificare sul vetro tutte le scene,
-   soft-key, righe lunghe e glifi accentati.
-2. Verificare il recovery del timeout GATT scollegando intenzionalmente il
+1. Verificare il recovery del timeout GATT scollegando intenzionalmente il
    device durante una write.
-3. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
+2. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
    `upstream` fetch-only.
-4. Non anticipare Screen Time: richiede Apple Developer Program a pagamento.
+3. Non anticipare Screen Time: richiede Apple Developer Program a pagamento.
 
 ## Decisioni da non riaprire senza nuova evidenza
 
