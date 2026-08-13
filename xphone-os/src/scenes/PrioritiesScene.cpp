@@ -127,7 +127,7 @@ void PrioritiesScene::onEnter() {
   // — main.cpp owns BLE begin/advertising): ask the phone for a fresh
   // snapshot so the list is not stale from a previous session.
   if (COMPANION_BLE.isConnected() && COMPANION_BLE.sendPrioritiesSyncRequest()) {
-    _localMsg = "Requesting priorities...";
+    _localMsg = L10N("Requesting priorities...", "Richiedo le priorità...");
   } else {
     // No transient in flight — leave the line empty so render() derives it live
     // from the connection ("Syncing..." vs "Connect Companion") and it can't go
@@ -137,8 +137,8 @@ void PrioritiesScene::onEnter() {
 }
 
 const char* const* PrioritiesScene::softKeys() const {
-  static constexpr const char* kList[4] = {"BACK", "DONE", "UP", "DOWN"};
-  static constexpr const char* kEmpty[4] = {"BACK", "SYNC", nullptr, nullptr};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("DONE", "FATTO"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kEmpty[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), nullptr, nullptr};
   return PRIORITIES_STORE.count() > 0 ? kList : kEmpty;
 }
 
@@ -155,9 +155,9 @@ void PrioritiesScene::toggleSelected() {
   // (PrioritiesManager.swift handleActionPayload), and that fresh card is
   // what repaints the row — the same wait CrossPoint's activity does.
   if (COMPANION_BLE.sendPriorityToggle(item.id, !item.done)) {
-    _localMsg = "Updating priority...";
+    _localMsg = L10N("Updating priority...", "Aggiorno la priorità...");
   } else {
-    _localMsg = "Connect Companion to update.";
+    _localMsg = L10N("Connect Companion to update.", "Collega Lume per aggiornare.");
   }
   markDirty();
 }
@@ -186,7 +186,7 @@ void PrioritiesScene::handleInput(Input& in) {
       // SYNC: re-request the snapshot (PrioritiesActivity does the same on
       // Confirm with an empty list). Empty line when offline so render()
       // derives the live Syncing/Connect message.
-      _localMsg = COMPANION_BLE.sendPrioritiesSyncRequest() ? "Requesting priorities..." : "";
+      _localMsg = COMPANION_BLE.sendPrioritiesSyncRequest() ? L10N("Requesting priorities...", "Richiedo le priorità...") : "";
       markDirty();
     }
     return;
@@ -223,7 +223,7 @@ void PrioritiesScene::render(Gfx& gfx) {
   if (_sel > count - 1) _sel = count > 0 ? count - 1 : 0;
 
   // --- Header: title + companion status (same chrome as BlockScene) --------
-  gfx.drawText(kFontBold, kMarginX, 8, "Priorities");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("Priorities", "Priorità"));
   // Transfer transients render as the paired up/down arrows; routine BLE
   // status ("Paired & encrypted", "Connected", advertising lines) stays OFF
   // the header — it read as noise. Connect problems surface in the empty
@@ -235,15 +235,15 @@ void PrioritiesScene::render(Gfx& gfx) {
   // --- Empty state (PrioritiesActivity renderEmpty) -------------------------
   if (count == 0) {
     const int cy = h / 2;
-    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), "Today's priorities");
+    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), L10N("Today's priorities", "Priorità di oggi"));
     // No snapshot yet: an in-flight transient ("Requesting priorities...")
     // wins; otherwise "Syncing..." while the link is up (main.cpp's auto-resync
     // has re-requested and the phone is about to answer), else the connect hint.
     const char* line = _localMsg[0]                 ? _localMsg
-                       : COMPANION_BLE.isConnected() ? "Syncing..."
-                                                     : "Connect Companion to sync.";
+                       : COMPANION_BLE.isConnected() ? L10N("Syncing...", "Sincronizzo...")
+                                                     : L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
     gfx.drawTextCentered(kFontRegular, w / 2, cy - gfx.lineHeight(kFontRegular) / 2, line);
-    gfx.drawTextCentered(kFontSmall, w / 2, cy + gfx.lineHeight(kFontRegular) + 6, "Sync from Companion to refresh.");
+    gfx.drawTextCentered(kFontSmall, w / 2, cy + gfx.lineHeight(kFontRegular) + 6, L10N("Sync from Companion to refresh.", "Sincronizza da Lume per aggiornare."));
     return;
   }
 
@@ -251,9 +251,9 @@ void PrioritiesScene::render(Gfx& gfx) {
   int active = 0, done = 0;
   PRIORITIES_STORE.tally(active, done);
   const int subY = kHeaderH + 10;
-  gfx.drawText(kFontBold, kMarginX, subY, "Today");
+  gfx.drawText(kFontBold, kMarginX, subY, L10N("Today", "Oggi"));
   char progress[32];
-  snprintf(progress, sizeof(progress), "%d active / %d done", active, done);
+  snprintf(progress, sizeof(progress), L10N("%d active / %d done", "%d attive / %d fatte"), active, done);
   gfx.drawText(kFontRegular, w - kMarginX - gfx.textWidth(kFontRegular, progress), subY, progress);
 
   const int syncY = subY + gfx.lineHeight(kFontBold) + 2;
@@ -283,7 +283,7 @@ void PrioritiesScene::render(Gfx& gfx) {
   if (count > perPage) {  // range indicator, right-aligned on the sync line
     char range[24];
     const int last = _scroll + perPage < count ? _scroll + perPage : count;
-    snprintf(range, sizeof(range), "%d-%d of %d", _scroll + 1, last, count);
+    snprintf(range, sizeof(range), L10N("%d-%d of %d", "%d-%d di %d"), _scroll + 1, last, count);
     gfx.drawText(kFontSmall, w - kMarginX - gfx.textWidth(kFontSmall, range), syncY, range);
   }
 
@@ -340,7 +340,7 @@ bool PrioritiesScene::renderDormant(Gfx& gfx) {
 
   // Title + short rule (same chrome family as the wordmark sleep screen).
   const int titleY = 52;
-  gfx.drawTextCentered(kFontBold, cx, titleY, "Today's priorities");
+  gfx.drawTextCentered(kFontBold, cx, titleY, L10N("Today's priorities", "Priorità di oggi"));
   constexpr int kRuleW = 56;
   gfx.fillRect(cx - kRuleW / 2, titleY + gfx.lineHeight(kFontBold) + 10, kRuleW, 2, true);
 
@@ -377,7 +377,7 @@ bool PrioritiesScene::renderDormant(Gfx& gfx) {
   }
   if (overflow) {
     char more[24];
-    snprintf(more, sizeof(more), "+%d more", count - rows);
+    snprintf(more, sizeof(more), L10N("+%d more", "altre %d"), count - rows);
     gfx.drawTextCentered(kFontSmall, cx, y + 4, more);
   }
 
@@ -401,7 +401,7 @@ bool PrioritiesScene::renderDormant(Gfx& gfx) {
     drawMoon(gfx, gx, h - 108 + (gfx.lineHeight(kFontBold) - moonD) / 2, moonD);
     gfx.drawText(kFontBold, gx + moonD + gap, h - 108, kWordmark);
   }
-  gfx.drawTextCentered(kFontSmall, cx, h - 56, "press power to wake");
+  gfx.drawTextCentered(kFontSmall, cx, h - 56, L10N("press power to wake", "premi accensione"));
   return true;
 }
 
@@ -414,13 +414,13 @@ bool PrioritiesScene::renderDormantBlockLine(Gfx& gfx, const int y) {
   if (block.active) {
     char when[24];
     if (block.endsAtLabel[0]) {
-      snprintf(when, sizeof(when), "Until %s", block.endsAtLabel);
+      snprintf(when, sizeof(when), L10N("Until %s", "Fino alle %s"), block.endsAtLabel);
     } else {
-      snprintf(when, sizeof(when), "%d min left", block.remainingMinutes);
+      snprintf(when, sizeof(when), L10N("%d min left", "%d min rimasti"), block.remainingMinutes);
     }
-    snprintf(label, sizeof(label), "%s | Today: %d", when, block.blocksToday);
+    snprintf(label, sizeof(label), L10N("%s | Today: %d", "%s | Oggi: %d"), when, block.blocksToday);
   } else if (block.blocksToday > 0) {
-    snprintf(label, sizeof(label), "Today: %d", block.blocksToday);
+    snprintf(label, sizeof(label), L10N("Today: %d", "Oggi: %d"), block.blocksToday);
   } else {
     return false;
   }

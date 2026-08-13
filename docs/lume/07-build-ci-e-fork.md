@@ -46,17 +46,17 @@ Nessun `CONFIG_BT_*` è necessario: arrivano dallo `sdkconfig.h` precompilato de
 - Idempotente (rileva il marker) e **fail-loud**: se l'ancora non c'è, `raise RuntimeError` e la build muore invece di degradare silenziosamente (`:31-35`).
 - Rischi in un fork: (a) la patch scrive nel **pacchetto condiviso** `~/.platformio/packages/...`, quindi contamina ogni altro progetto sulla stessa macchina che usa quel framework; (b) qualsiasi bump di piattaforma richiede di ri-verificare il leak e l'ancora; (c) la CI mette `~/.platformio` in cache (`firmware-release.yml:33-36`), quindi la patch viaggia nella cache.
 
-## 2. Env PlatformIO
+## 2. Env PlatformIO Lume
 
 | Env | Define aggiunti | Immagine prodotta |
 |---|---|---|
-| `x3` (default, `platformio.ini:11,95-103`) | `FREEINK_DEVICE_X3=1`, `FREEINK_DEVICE_X4=1`, `FREEINK_BATTERY_I2C_GAUGE=1` | universale X3+X4 |
-| `xteink` (`:110-115`) | `FREEINK_DEVICE_X3=1`, `FREEINK_DEVICE_X4=1` | universale X3+X4 |
-| `x4` (`:119-124`) | `FREEINK_DEVICE_X3=1`, `FREEINK_DEVICE_X4=1` | universale X3+X4 |
+| `lume-x3-it` (default) | `FREEINK_DEVICE_X3=1`, `FREEINK_BATTERY_I2C_GAUGE=1`, `LUME_LOCALE_IT=1` | X3, solo italiano |
+| `lume-x3-en` | `FREEINK_DEVICE_X3=1`, `FREEINK_BATTERY_I2C_GAUGE=1`, `LUME_LOCALE_EN=1` | X3, solo inglese |
 
-I tre env sono **alias**: ogni build compila entrambi i `BoardProfile` e il pannello viene scelto a runtime da `freeink::selectXteinkDevice()` (fingerprint I2C, stage 2 di `main.cpp`) — vedi commento `platformio.ini:1-8`. Ragione storica: i binari per-device brickavano i tester, perché entrambi gli zip di release contengono un file chiamato `update.bin` e quello sbagliato inizializza il controller di pannello sbagliato (schermo congelato, device apparentemente morto).
-
-`FREEINK_BATTERY_I2C_GAUGE` esplicito in `[env:x3]` è **ridondante**: `freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h:158-159` lo definisce già come `(FREEINK_DEVICE_X3 || …)`, e tutti gli env definiscono `FREEINK_DEVICE_X3=1`. Conseguenza: `x3` e `x4` producono lo stesso binario.
+I due env differiscono soltanto per la lingua, scelta nel preprocessore da
+`src/LumeLocale.h`. Il binario non contiene i letterali della lingua esclusa.
+Non esistono più env X4 o immagine universale nel fork Lume. Il guard hardware
+continua a verificare il fingerprint X3 prima di inizializzare UC8253.
 
 ### 2.1 `lib_deps` (`platformio.ini:83-90`)
 
@@ -66,34 +66,40 @@ Sei librerie dell'SDK vendorizzato entrano via **symlink**: `BoardConfig`, `EInk
 
 ```sh
 cd xphone-os
-pio run -e x3                 # build (default env)
-pio run -e x3 -e x4           # entrambi gli env, come in CI
-pio run -e x3 -t upload --upload-port /dev/cu.usbmodem*   # flash USB, ~20 s, hash-verified
-pio device monitor --baud 115200
-pio run -t erase              # cancella la flash (azzera bond BLE in NVS) → poi reflash
+../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
+../.venv/bin/pio run -e lume-x3-it -t upload --upload-port /dev/cu.usbmodem*
+../.venv/bin/pio device monitor --baud 115200
 ```
 
-Requisiti macOS: Python 3 + `pio` (`pip install platformio`), nessun driver seriale extra (USB-Serial/JTAG nativo, la porta è `/dev/cu.usbmodem*`). Il flash USB richiede il **cavo pogo a 4 pin**: quello a 2 pin fornito con molti X3 è solo carica e il device non enumera (`README.md:114-116`). Il deep sleep chiude la porta USB: premere power per svegliare prima di flashare (`xphone-os/README.md:62-63`). Fallback senza cavo dati: copiare l'immagine sulla SD come `/update.bin` (nome atteso da `src/SdUpdate.cpp:33`) e tenere premuti Left + Power.
+Requisiti macOS: Python 3.11, PlatformIO 6.1.19 nella `.venv`, nessun driver
+seriale extra. Il flash USB richiede il cavo pogo a 4 pin; il deep sleep chiude
+la porta, quindi premere power prima dell'upload.
 
-`pio run -t erase` cancella **tutta** la flash, non solo la partizione `nvs`: spariscono anche slot OTA e spiffs; va sempre seguito da un reflash.
+Da Settings → SD Firmware Update si può scegliere direttamente
+`update_it.bin` o `update_en.bin`. Il boot updater Left + Power cerca invece
+`/update.bin`: rinominare il file scelto, oppure usare lo zip locale prodotto
+dalla release. Un erase completo non è un normale aggiornamento: cancella
+anche bond BLE, slot OTA e spiffs.
 
 ## 4. CI / release
 
-Unico workflow: `.github/workflows/firmware-release.yml`, nome `Firmware Release`, job `release` su `ubuntu-latest`.
+`.github/workflows/firmware-release.yml` (`Lume Firmware Release`) parte su tag
+`fw-v*` o `workflow_dispatch`, usa Python 3.11 e PlatformIO 6.1.19, quindi:
 
-- Trigger: `push` di tag `fw-v*` (`:4-6`) oppure `workflow_dispatch` con input `version` (`:7-12`). Permessi: `contents: write` (`:14-15`) — nessun segreto oltre `GITHUB_TOKEN`.
-- Step, in ordine:
-  1. `Check out repository` — `actions/checkout@v4` (`:22-23`).
-  2. `Set up Python` — 3.11 (`:25-28`).
-  3. `Cache PlatformIO` — cache di `~/.platformio` e `xphone-os/.pio/build`, chiave `${{ runner.os }}-platformio-${{ hashFiles('xphone-os/platformio.ini') }}` (`:30-36`).
-  4. `Install PlatformIO` — `pip install platformio` (`:38-39`).
-  5. `Resolve release version` — da `push` deriva `VERSION=${GITHUB_REF_NAME#fw-v}` e `RELEASE_TAG=$GITHUB_REF_NAME`; da dispatch costruisce `RELEASE_TAG=fw-v$VERSION` (`:41-54`).
-  6. `Build firmware` — `cd xphone-os && pio run -e x3 -e x4` (`:56-57`).
-  7. `Stage release assets` (`:59-128`) — produce in `dist/`:
-     `flowe-x3.bin`, `flowe-x4.bin` (copie di `.pio/build/{x3,x4}/firmware.bin`), `flowe-x3-${VERSION}.bin`, `flowe-x4-${VERSION}.bin`, `update.bin` (copia dell'immagine x3, pre-nominata per l'updater SD), `flowe-x3.zip` (contiene `flowe-x3/update.bin` + `flowe-x3/README.txt` con le 3 istruzioni SD e il link `https://www.flowe.ink/flash`), `SHA256SUMS.txt` (`sha256sum` su zip, `update.bin` e i 4 `.bin`), `latest.json` (JSON compatto: `version`, `date` ISO-8601 UTC, `assets.x3/.x4` con `file` e `sha256`).
-  8. `Create GitHub release` — `softprops/action-gh-release@v2` con `tag_name: ${{ env.RELEASE_TAG }}`, `name: Firmware ${{ env.VERSION }}`, `generate_release_notes: true`, `fail_on_unmatched_files: true`, `files: dist/*` (`:130-137`).
+1. compila `lume-x3-it` e `lume-x3-en`;
+2. pubblica `update_it.bin`, `update_en.bin`, `lume-x3-it.bin`,
+   `lume-x3-en.bin` e copie versionate;
+3. crea `lume-x3-it.zip` e `lume-x3-en.zip`, ciascuno con il corretto
+   `update.bin` e le istruzioni del boot updater;
+4. calcola `SHA256SUMS.txt`;
+5. genera `latest.json` con `assets.x3.defaultLocale = "it"` e
+   `assets.x3.locales.it/en`;
+6. crea la GitHub Release tramite `softprops/action-gh-release@v2`.
 
-Replica in un fork: (a) abilitare Actions sul fork (per i fork sono disattivate di default); (b) nessun segreto da configurare, basta che il workflow abbia `permissions: contents: write`, e in Settings → Actions → General il `GITHUB_TOKEN` sia in modalità read/write; (c) `zip` e `sha256sum` esistono già su `ubuntu-latest`; (d) taggare `git tag fw-v0.6.0 && git push origin fw-v0.6.0`. Il workflow **non** verifica che il tag corrisponda a `XPHONE_VERSION` (`src/scenes/AppScenes.h:10`): allineare a mano prima di taggare.
+Per un fork: abilitare Actions, concedere al `GITHUB_TOKEN` permessi contents
+read/write e taggare `fw-vX.Y.Z`. Nessun segreto applicativo è richiesto. Il
+workflow non verifica la corrispondenza tra tag e `XPHONE_VERSION`: allinearli
+prima del tag.
 
 ## 5. Licenze
 

@@ -18,6 +18,7 @@
 
 #include "../NotificationFilter.h"
 #include "../NotificationStore.h"
+#include "../LumeLocale.h"
 #include "BleShim.h"
 #include "CompanionBleService.h"
 
@@ -326,28 +327,28 @@ bool sameUuid(const ble_uuid_t* a, const ble_uuid128_t& b) { return ble_uuid_cmp
 
 const char* eventName(uint8_t eventId) {
   switch (eventId) {
-    case NotificationAdded: return "added";
-    case NotificationModified: return "modified";
-    case NotificationRemoved: return "removed";
-    default: return "unknown";
+    case NotificationAdded: return L10N("added", "aggiunta");
+    case NotificationModified: return L10N("modified", "modificata");
+    case NotificationRemoved: return L10N("removed", "rimossa");
+    default: return L10N("unknown", "sconosciuta");
   }
 }
 
 const char* categoryName(uint8_t categoryId) {
   switch (categoryId) {
-    case CategoryIncomingCall: return "call";
-    case CategoryMissedCall: return "missed call";
-    case CategoryVoicemail: return "voicemail";
-    case CategorySocial: return "social";
-    case CategorySchedule: return "schedule";
-    case CategoryEmail: return "email";
-    case CategoryNews: return "news";
-    case CategoryHealthAndFitness: return "health";
-    case CategoryBusinessAndFinance: return "finance";
-    case CategoryLocation: return "location";
-    case CategoryEntertainment: return "entertainment";
+    case CategoryIncomingCall: return L10N("call", "chiamata");
+    case CategoryMissedCall: return L10N("missed call", "chiamata persa");
+    case CategoryVoicemail: return L10N("voicemail", "segreteria");
+    case CategorySocial: return L10N("social", "social");
+    case CategorySchedule: return L10N("schedule", "calendario");
+    case CategoryEmail: return L10N("email", "email");
+    case CategoryNews: return L10N("news", "notizie");
+    case CategoryHealthAndFitness: return L10N("health", "salute");
+    case CategoryBusinessAndFinance: return L10N("finance", "finanza");
+    case CategoryLocation: return L10N("location", "posizione");
+    case CategoryEntertainment: return L10N("entertainment", "intrattenimento");
     case CategoryOther:
-    default: return "other";
+    default: return L10N("other", "altro");
   }
 }
 
@@ -542,10 +543,10 @@ void CompanionAncsClient::begin() {
   BLEDevice::setCustomGapHandler(ancsGapEvent);
   started = true;
   pairingRequested = false;
-  setStatus("ANCS idle");
+  setStatus(L10N("ANCS idle", "ANCS inattivo"));
 #else
   started = true;
-  setStatus("ANCS needs NimBLE");
+  setStatus(L10N("ANCS needs NimBLE", "ANCS richiede NimBLE"));
 #endif
 }
 
@@ -580,14 +581,14 @@ void CompanionAncsClient::requestPairing() {
       // iOS rejects ANCS discovery on an unencrypted link with insufficient
       // authentication. Wait for pairing — handleAuthenticationComplete()
       // starts discovery once the link encrypts.
-      setStatus("Waiting for iPhone pairing");
+      setStatus(L10N("Waiting for iPhone pairing", "Attendo l'abbinamento iPhone"));
     }
   } else {
-    setStatus("Pair X4 in iPhone Bluetooth");
+    setStatus(L10N("Pair Lume X3 in iPhone Bluetooth", "Abbina Lume X3 in Bluetooth iPhone"));
   }
 #else
   (void)handle;
-  setStatus("ANCS needs NimBLE");
+  setStatus(L10N("ANCS needs NimBLE", "ANCS richiede NimBLE"));
 #endif
 }
 
@@ -761,7 +762,7 @@ void CompanionAncsClient::handleServerConnect(uint16_t handle) {
   xSemaphoreGive(stateMutex);
 
   if (shouldStart) {
-    setStatus("iPhone connected; pairing");
+    setStatus(L10N("iPhone connected; pairing", "iPhone connesso; abbino"));
   }
 }
 
@@ -787,7 +788,7 @@ void CompanionAncsClient::handleServerDisconnect(uint16_t handle) {
   xSemaphoreGive(stateMutex);
 
   if (shouldReport) {
-    setStatus("ANCS disconnected");
+    setStatus(L10N("ANCS disconnected", "ANCS disconnesso"));
   }
 }
 
@@ -804,14 +805,14 @@ void CompanionAncsClient::handleControlPointWriteComplete(int status) {
     return;
   }
   LOG_ERR("ANCS", "Control Point write failed kind=%u status=%d", static_cast<unsigned>(kind), status);
-  setStatus(kind == ControlPointDismiss ? "ANCS dismiss failed" : "ANCS attr request failed");
+  setStatus(kind == ControlPointDismiss ? L10N("ANCS dismiss failed", "Rimozione ANCS non riuscita") : L10N("ANCS attr request failed", "Richiesta attributi ANCS fallita"));
 }
 
 void CompanionAncsClient::handleAuthenticationComplete(ble_gap_conn_desc* desc) {
   if (!desc) return;
   if (!desc->sec_state.encrypted) {
     if (isPairingRequested()) {
-      setStatus("ANCS waiting for encryption");
+      setStatus(L10N("ANCS waiting for encryption", "ANCS attende la cifratura"));
     }
     return;
   }
@@ -876,11 +877,11 @@ void CompanionAncsClient::startDiscovery(uint16_t handle) {
   ++revision;
   xSemaphoreGive(stateMutex);
 
-  setStatus("Discovering ANCS");
+  setStatus(L10N("Discovering ANCS", "Cerco ANCS"));
   const int rc = ble_gattc_disc_svc_by_uuid(handle, &ANCS_SERVICE_UUID.u, serviceDiscoveryCallback, this);
   if (rc != 0) {
     LOG_ERR("ANCS", "ble_gattc_disc_svc_by_uuid rc=%d", rc);
-    setStatus("ANCS discovery start failed");
+    setStatus(L10N("ANCS discovery start failed", "Avvio ricerca ANCS fallito"));
   }
 }
 
@@ -928,7 +929,7 @@ void CompanionAncsClient::handleNotificationSourceSubscribed() {
   ++revision;
   xSemaphoreGive(stateMutex);
   LOG_INF("ANCS", "ANCS subscribed");
-  setStatus("ANCS subscribed; send notification");
+  setStatus(L10N("ANCS subscribed; send notification", "ANCS attivo; invia una notifica"));
 }
 
 void CompanionAncsClient::handleNotificationSourceSubscriptionFailed() {
@@ -1006,9 +1007,9 @@ void CompanionAncsClient::discoverCharacteristics() {
   const int rc = ble_gattc_disc_all_chrs(handle, start, end, characteristicDiscoveryCallback, this);
   if (rc != 0) {
     LOG_ERR("ANCS", "ble_gattc_disc_all_chrs rc=%d", rc);
-    setStatus("ANCS char discovery failed");
+    setStatus(L10N("ANCS char discovery failed", "Ricerca caratteristiche ANCS fallita"));
   } else {
-    setStatus("Discovering ANCS chars");
+    setStatus(L10N("Discovering ANCS chars", "Cerco caratteristiche ANCS"));
   }
 }
 
@@ -1022,7 +1023,7 @@ void CompanionAncsClient::subscribeNotificationSource() {
   xSemaphoreGive(stateMutex);
 
   if (handle == NO_CONN_HANDLE || valueHandle == 0) {
-    setStatus("ANCS notification source missing");
+    setStatus(L10N("ANCS notification source missing", "Sorgente notifiche ANCS assente"));
     return;
   }
 
@@ -1031,9 +1032,9 @@ void CompanionAncsClient::subscribeNotificationSource() {
                                       notificationSourceSubscribeCallback, this);
   if (rc != 0) {
     LOG_ERR("ANCS", "Notification Source CCCD write rc=%d", rc);
-    setStatus("ANCS notif subscribe start failed");
+    setStatus(L10N("ANCS notif subscribe start failed", "Iscrizione notifiche ANCS fallita"));
   } else {
-    setStatus("Subscribing ANCS source");
+    setStatus(L10N("Subscribing ANCS source", "Iscrivo sorgente ANCS"));
   }
 }
 
@@ -1042,7 +1043,7 @@ void CompanionAncsClient::subscribeNotificationSource() {
 // every notification still in Notification Center (EventFlagPreExisting),
 // which handleNotificationSource feeds through the normal backfill queue.
 void CompanionAncsClient::handleNotificationSourceUnsubscribed() {
-  setStatus("ANCS resyncing");
+  setStatus(L10N("ANCS resyncing", "ANCS si risincronizza"));
   subscribeNotificationSource();
 }
 
@@ -1056,7 +1057,7 @@ void CompanionAncsClient::subscribeDataSource() {
   xSemaphoreGive(stateMutex);
 
   if (handle == NO_CONN_HANDLE || valueHandle == 0) {
-    setStatus("ANCS data source missing");
+    setStatus(L10N("ANCS data source missing", "Sorgente dati ANCS assente"));
     return;
   }
 
@@ -1065,11 +1066,11 @@ void CompanionAncsClient::subscribeDataSource() {
                                       dataSourceSubscribeCallback, this);
   if (rc != 0) {
     LOG_ERR("ANCS", "Data Source CCCD write rc=%d", rc);
-    setStatus("ANCS data subscribe start failed");
+    setStatus(L10N("ANCS data subscribe start failed", "Iscrizione dati ANCS fallita"));
   } else {
     // ancsReady is set in handleNotificationSourceSubscribed() once BOTH
     // CCCDs are written (Data Source here, Notification Source next).
-    setStatus("Subscribing ANCS data");
+    setStatus(L10N("Subscribing ANCS data", "Iscrivo dati ANCS"));
   }
 }
 
@@ -1128,10 +1129,10 @@ bool CompanionAncsClient::requestNotificationAttributes(uint32_t notificationUid
 
   if (!writeControlPoint(cmd, sizeof(cmd), ControlPointNotificationAttributes)) {
     LOG_DBG("ANCS", "Control Point attr request deferred uid=%lu", static_cast<unsigned long>(notificationUid));
-    setStatus("ANCS attr request start failed");
+    setStatus(L10N("ANCS attr request start failed", "Richiesta attributi ANCS fallita"));
     return false;
   }
-  setStatus("Requesting notification text");
+  setStatus(L10N("Requesting notification text", "Richiedo il testo notifica"));
   return true;
 }
 
@@ -1200,7 +1201,7 @@ void CompanionAncsClient::removeNotification(uint32_t notificationUid) {
 void CompanionAncsClient::handleNotificationSource(const uint8_t* data, std::size_t length,
                                                    uint32_t sessionId) {
   if (length < 8) {
-    setStatus("Short ANCS event");
+    setStatus(L10N("Short ANCS event", "Evento ANCS incompleto"));
     return;
   }
 
@@ -1256,12 +1257,12 @@ void CompanionAncsClient::handleNotificationSource(const uint8_t* data, std::siz
     enqueueBackfill(notificationUid, categoryId, eventFlags, sessionId, /*front=*/!preExisting);
     if (!preExisting) {
       char status[48];
-      snprintf(status, sizeof(status), "ANCS %s %s", eventName(eventId), categoryName(categoryId));
+      snprintf(status, sizeof(status), L10N("ANCS %s %s", "ANCS %s %s"), eventName(eventId), categoryName(categoryId));
       setStatus(status);
     }
   } else if (eventId == NotificationRemoved) {
     removeNotification(notificationUid);
-    setStatus("ANCS notification removed");
+    setStatus(L10N("ANCS notification removed", "Notifica ANCS rimossa"));
   }
 }
 
@@ -1483,7 +1484,7 @@ void CompanionAncsClient::pumpBackfill() {
 void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t length,
                                            uint32_t sourceSessionId) {
   if (!data || length == 0) {
-    setStatus("Empty ANCS data");
+    setStatus(L10N("Empty ANCS data", "Dati ANCS vuoti"));
     return;
   }
 
@@ -1510,7 +1511,7 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
     responseUid = dataSourceBufferUid;  // continuation of the buffered response
   } else {
     LOG_ERR("ANCS", "Unexpected ANCS data fragment len=%u first=0x%02x", static_cast<unsigned>(length), data[0]);
-    setStatus("Unexpected ANCS data");
+    setStatus(L10N("Unexpected ANCS data", "Dati ANCS inattesi"));
     return;
   }
   if (static_cast<std::size_t>(dataSourceLen) + length > sizeof(dataSourceBuffer)) {
@@ -1518,7 +1519,7 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
     dataSourceLen = 0;
     dataSourceBufferUid = 0;
     LOG_ERR("ANCS", "ANCS data response too large uid=%lu", static_cast<unsigned long>(responseUid));
-    setStatus("ANCS data too large");
+    setStatus(L10N("ANCS data too large", "Dati ANCS troppo grandi"));
     return;
   }
   std::memcpy(dataSourceBuffer + dataSourceLen, data, length);
@@ -1536,7 +1537,7 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
     if (needsMore) {
       LOG_INF("ANCS", "ANCS data fragment uid=%lu bytes=%u; waiting for more", static_cast<unsigned long>(responseUid),
               static_cast<unsigned>(dataSourceLen));
-      setStatus("ANCS data fragment");
+      setStatus(L10N("ANCS data fragment", "Frammento dati ANCS"));
       return;
     }
 
@@ -1544,7 +1545,7 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
             static_cast<unsigned>(dataSourceLen));
     dataSourceLen = 0;
     dataSourceBufferUid = 0;
-    setStatus("ANCS data parse failed");
+    setStatus(L10N("ANCS data parse failed", "Lettura dati ANCS fallita"));
     return;
   }
 
@@ -1590,7 +1591,7 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
     LOG_INF("ANCS", "Tombstone suppressed replay uid=%lu date=%llu title=%s",
             static_cast<unsigned long>(parsed.uid), static_cast<unsigned long long>(dateKey), title);
     dismissNotification(parsed.uid, categoryId, eventFlags, sessionId);
-    setStatus("ANCS cleared replay suppressed");
+    setStatus(L10N("ANCS cleared replay suppressed", "Replay ANCS eliminato"));
   } else {
     // Learn (and tally) every app before applying the blocklist. The phone's
     // picker is populated from this cache — sorted by how noisy each app is —
@@ -1601,12 +1602,12 @@ void CompanionAncsClient::handleDataSource(const uint8_t* data, std::size_t leng
       // action, because the user still wants the notification on the iPhone.
       LOG_INF("ANCS", "Hidden notification uid=%lu app=%s", static_cast<unsigned long>(parsed.uid), parsed.app);
       char filteredStatus[48];
-      std::snprintf(filteredStatus, sizeof(filteredStatus), "ANCS hid %.31s", parsed.app);
+      std::snprintf(filteredStatus, sizeof(filteredStatus), L10N("ANCS hid %.31s", "ANCS nascosta: %.28s"), parsed.app);
       setStatus(filteredStatus);
     } else {
       NOTIFICATION_STORE.add(parsed.uid, parsed.app, title, message, dateKey, categoryId, eventFlags,
                              sessionId);
-      setStatus("ANCS notification loaded");
+      setStatus(L10N("ANCS notification loaded", "Notifica ANCS caricata"));
     }
   }
 
@@ -1720,7 +1721,7 @@ void CompanionAncsClient::appDisplayName(const char* bundleId, char* out, std::s
     prettifyBundle(bundleId, out, outSize);
     return;
   }
-  std::snprintf(out, outSize, "%s", "unknown");
+  std::snprintf(out, outSize, "%s", L10N("unknown", "sconosciuta"));
 }
 
 std::size_t CompanionAncsClient::appCount() const { return appNameCacheCount; }

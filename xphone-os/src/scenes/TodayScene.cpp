@@ -154,15 +154,15 @@ void TodayScene::onEnter() {
 
 void TodayScene::requestSync() {
   if (COMPANION_BLE.isConnected() && COMPANION_BLE.sendTodaySyncRequest()) {
-    _localMsg = "Requesting today...";
+    _localMsg = L10N("Requesting today...", "Richiedo l'agenda...");
   } else {
     _localMsg = "";
   }
 }
 
 const char* const* TodayScene::softKeys() const {
-  static constexpr const char* kFull[4] = {"BACK", "SYNC", "UP", "DOWN"};
-  static constexpr const char* kEmpty[4] = {"BACK", "SYNC", nullptr, nullptr};
+  static constexpr const char* kFull[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kEmpty[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), nullptr, nullptr};
   return TODAY_STORE.hasSnapshot() ? kFull : kEmpty;
 }
 
@@ -204,18 +204,18 @@ void TodayScene::render(Gfx& gfx) {
   }
 
   // --- Header: title + sync line (or companion status) ----------------------
-  gfx.drawText(kFontBold, kMarginX, 8, "Today");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("Today", "Oggi"));
   {
     // A pending sync shows "syncing..." at the top over whatever cached snapshot
     // is on glass (seeded from NVS on wake); it clears to the "Synced HH:MM"
     // line once the fresh card lands (revision bump clears _localMsg). No BLE
     // status fallback — routine rail text ("Paired & encrypted") is noise here.
-    const char* detailSrc = _localMsg[0]                  ? "syncing..."
+    const char* detailSrc = _localMsg[0]                  ? L10N("syncing...", "sincronizzo...")
                             : TODAY_STORE.syncLine()[0]   ? TODAY_STORE.syncLine()
                                                           : nullptr;
     if (detailSrc) {
       char detail[96];
-      const int detailMax = w - 2 * kMarginX - gfx.textWidth(kFontBold, "Today") - 12;
+      const int detailMax = w - 2 * kMarginX - gfx.textWidth(kFontBold, L10N("Today", "Oggi")) - 12;
       truncateToWidth(gfx, kFontRegular, detailSrc, detailMax, detail, sizeof(detail));
       gfx.drawText(kFontRegular, w - kMarginX - gfx.textWidth(kFontRegular, detail), 8, detail);
     }
@@ -248,13 +248,13 @@ void TodayScene::render(Gfx& gfx) {
     _scroll = 0;
     _maxScrollCache = 0;
     const int cy = h / 2;
-    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), "Sync Today");
+    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), L10N("Sync Today", "Sincronizza Oggi"));
     const char* line = _localMsg[0]                 ? _localMsg
-                       : COMPANION_BLE.isConnected() ? "Syncing..."
-                                                     : "Connect Companion to sync.";
+                       : COMPANION_BLE.isConnected() ? L10N("Syncing...", "Sincronizzo...")
+                                                     : L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
     gfx.drawTextCentered(kFontRegular, w / 2, cy - gfx.lineHeight(kFontRegular) / 2, line);
     gfx.drawTextCentered(kFontRegular, w / 2, cy + gfx.lineHeight(kFontRegular) + 6,
-                         "Calendar and reminders appear here.");
+                         L10N("Calendar and reminders appear here.", "Calendario e promemoria appaiono qui."));
     return;
   }
 
@@ -294,7 +294,11 @@ void TodayScene::render(Gfx& gfx) {
     switch (r.type) {
       case RowType::DayDivider: {
         if (!TODAY_STORE.get(static_cast<std::size_t>(r.item), item)) break;
-        const char* label = item.subtitle[0] ? item.subtitle : "TODAY";
+        const char* label = item.subtitle[0] ? item.subtitle : L10N("TODAY", "OGGI");
+        const char* displayLabel = label;
+        if (strcmp(label, "TODAY") == 0) displayLabel = L10N("TODAY", "OGGI");
+        if (strcmp(label, "TONIGHT") == 0) displayLabel = L10N("TONIGHT", "STASERA");
+        if (strcmp(label, "TOMORROW") == 0) displayLabel = L10N("TOMORROW", "DOMANI");
         const int labelTop = y + kHeadTopPad;
         const int iconY = labelTop + kIconVAdjust;
         if (strcmp(label, "TONIGHT") == 0) {
@@ -302,13 +306,13 @@ void TodayScene::render(Gfx& gfx) {
         } else {
           drawSun(gfx, kMarginX, iconY, kIcon);
         }
-        gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, label);
+        gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, displayLabel);
         break;
       }
       case RowType::SectionReminders: {
         const int labelTop = y + kHeadTopPad;
         drawBell(gfx, kMarginX, labelTop + kIconVAdjust, kIcon);
-        gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, "REMINDERS");
+        gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, L10N("REMINDERS", "PROMEMORIA"));
         break;
       }
       case RowType::Item:
@@ -328,7 +332,7 @@ void TodayScene::render(Gfx& gfx) {
         }
         // Line 2: title — bold, near full width, beneath the time.
         char title[112];
-        truncateToWidth(gfx, kFontBold, item.title[0] ? item.title : "Untitled", lineW, title, sizeof(title));
+        truncateToWidth(gfx, kFontBold, item.title[0] ? item.title : L10N("Untitled", "Senza titolo"), lineW, title, sizeof(title));
         gfx.drawText(kFontBold, textX, y + kTimeLineH, title);
         (void)smallH;
         break;

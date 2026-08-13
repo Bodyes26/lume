@@ -9,93 +9,107 @@ Contesto di piattaforma rilevante per tutti i punti:
 
 ---
 
-## 1. Localizzazione italiana con switcher runtime
+## 1. Localizzazione italiana a compile time — implementata
 
-### Dove vivono le stringhe (censimento eseguito su tutti i `.cpp/.h` di `src/`)
+### Decisione
 
-Metodo: estrazione dei letterali stringa per riga, esclusi commenti/`#include`, con classificazione per contesto (log `Serial.*`, chiavi NVS/JSON, path, testo UI). Conteggio delle **occorrenze UI** (letterali che finiscono su schermo, incluse le format string):
+Il selettore runtime descritto nella prima analisi è stato scartato. Lume produce
+un'immagine per lingua:
 
-| File | Occorrenze UI | Note |
+| Env PlatformIO | Definizione | Artefatto diretto |
 |---|---|---|
-| `src/scenes/BlockScene.cpp` | 52 | include preset+azioni (`:26-29`, `:38-40`), messaggi di stato, `"min left"`/`"min break"` (`:526`) |
-| `src/scenes/SettingsScene.cpp` | 39 | voci menu (`:38`), label pack icone (`:331`), conferme (`:402-419`) |
-| `src/scenes/AboutScene.cpp` | 37 | quasi tutte `snprintf` diagnostiche (`:35-232`) |
-| `src/scenes/ReaderScene.cpp` | 34 | stati Opening/Indexing/Error (`:842-911`), statistiche (`:987-998`) |
-| `src/scenes/PrioritiesScene.cpp` | 26 | include frame dormiente (`:343-404`, `:417-423`) |
-| `src/scenes/FileTransferScene.cpp` | 25 | testo spezzato a mano su più righe (`:271-323`) |
-| `src/scenes/NotificationsScene.cpp` | 22 | `"Notifications (%d)"`, `"%d of %d"` |
-| `src/scenes/WorkoutScene.cpp` | 22 | `"%d / %d done"`, `"%d sets"` |
-| `src/scenes/TodayScene.cpp` | 18 | header `"TODAY"/"TONIGHT"/"REMINDERS"` (`:297-311`) |
-| `src/scenes/LauncherScene.cpp` | 17 | nomi app (`:22-24`), wordmark `"flowe"` (`:173`) |
-| `src/scenes/AppScenes.cpp` | 11 | nomi scena per diagnostica/titoli (`:128-138`) |
-| `src/Scene.cpp` | 8 | soft-key default (`:12`), tier refresh |
-| `src/main.cpp` | 6 | splash `"flowe"`/`"waking up..."` (`:91-95`), `"Restarting..."` (`:552`) |
-| `src/Sleep.cpp` | 2 | `"press power to wake"`, `"xphone"` (`:104-123`) |
-| `src/SyncIndicator.h`, `src/StatusBar.h`, `src/BatteryGauge.cpp`, `src/SdUpdate.cpp` | 6 | `"Sent"/"Received"` (`SyncIndicator.h:39-40`), `"%d%%"/"--%%"` (`StatusBar.h:82-84`) |
-| **Totale scene/UI** | **323 occorrenze → 213 stringhe uniche** | 51 delle uniche contengono format `printf` |
+| `lume-x3-it` (default) | `LUME_LOCALE_IT=1` | `update_it.bin` |
+| `lume-x3-en` | `LUME_LOCALE_EN=1` | `update_en.bin` |
 
-A queste si aggiunge il rail di stato BLE, anch'esso mostrato dalle scene:
-- 38 letterali `setStatus("…")`, 36 unici (`src/ble/CompanionAncsClient.cpp:544-1565`, `src/ble/CompanionBleService.cpp:627-847`) — include un bug di branding: `"Pair X4 in iPhone Bluetooth"` (`CompanionAncsClient.cpp:585`) su un X3.
-- 14 `statusMessage = "…"` unici (`CompanionBleService.cpp:386-1187`).
+`src/LumeLocale.h` espone `L10N(english, italian)`. La scelta avviene nel
+preprocessore, prima della compilazione: il linker non riceve il letterale della
+lingua esclusa. Non esistono lingua in NVS, BSS aggiuntiva, cambio a caldo o
+seconda tabella di puntatori. Definire entrambe le macro genera `#error`; una
+build ad hoc senza macro resta italiana.
 
-**Totale realistico da tradurre: ~263 stringhe uniche**, di cui ~60 sono format string con placeholder.
+La scelta è stata verificata sui binari, non solo sul sorgente:
 
-### Soft-key (vincolo forte)
+* `update_it.bin` contiene `Impostazioni`, `Nessuna notifica`,
+  `Priorità di oggi`, `Allenamento di oggi`, `Nessun libro trovato` e non le
+  corrispondenti stringhe inglesi;
+* `update_en.bin` mostra il risultato opposto;
+* entrambe le immagini superano build PlatformIO e validazione
+  `esptool image-info` come ESP32-C3, checksum e validation hash validi.
 
-27 array statici `static constexpr const char* kX[4]` restituiti da `softKeys()`, 22 label uniche: `BACK, OPEN, PREV, NEXT, UP, DOWN, SYNC, DONE, SELECT, START, MODE, BREAK, BOOKS, SIZE, CLEAR, CANCEL, EXIT, RETRY, SETTINGS, YES, NO, +SET` (`BlockScene.cpp:175-180`, `FileTransferScene.cpp:60-64`, `LauncherScene.cpp:150`, `NotificationsScene.cpp:68-71`, `PrioritiesScene.cpp:140-141`, `ReaderScene.cpp:263-267`, `SettingsScene.cpp:95-97`, `TodayScene.cpp:164-165`, `WorkoutScene.cpp:101-102`, `Scene.cpp:12`).
+### Superfici localizzate
 
-Il contratto richiede **stringhe statiche lette a render time** (`Scene.h:29-30`); `drawSoftKeyBar` le legge una volta per repaint (`Scene.cpp:97-106`, chiamato da `Scene.cpp:181`). Restituire puntatori a letterali in flash di un'altra lingua rispetta il contratto: i puntatori restano validi per sempre.
+La localizzazione copre splash e riavvio, sleep face, barra soft-key, launcher e
+tutte le scene: Notifications, Priorities, Today, Workout, Block/Focus, Reader,
+File Transfer, Settings e About. Sono localizzati titoli, stati vuoti,
+richieste/sincronizzazione, errori, conferme, contatori, statistiche reader,
+giorni della settimana e nomi scena diagnostici.
 
-Larghezza tab su X3: `marginX = 528*8/100 = 42`, `tabW = (528 - 84 - 30)/4 = 103 px` (`Scene.cpp:28-29`, `:56-67`). Misure calcolate con le advance reali di `ubuntu_10_regular_ascii.h` (12.4 fp, `Gfx.cpp:239-249`):
+Le label soft-key rispettano la larghezza del tab X3: `INDIETRO`, `APRI`,
+`PREC`, `SUCC`, `SU`, `GIÙ`, `SINC`, `FATTO`, `SCEGLI`, `AVVIA`, `MODALITÀ`,
+`PAUSA`, `LIBRI`, `TESTO`, `ELIMINA`, `ANNULLA`, `ESCI`, `RIPROVA`, `IMPOSTA`,
+`SÌ`, `NO`, `+SERIE`. I font UI includono Latin-1 e quindi renderizzano
+correttamente `à`, `è`, `ì`, `ù` e le maiuscole accentate.
 
-| IT | px | Esito | IT | px | Esito |
-|---|---|---|---|---|---|
-| INDIETRO | 94 | ok (stretto) | CONFERMA | **112** | **overflow** |
-| ANNULLA | 94 | ok (stretto) | IMPOST. | 81 | ok |
-| AVANTI | 74 | ok | PRECED. | 83 | ok |
-| RIPROVA | 88 | ok | SINCR. | 63 | ok |
-| FATTO | 65 | ok | AVVIA | 61 | ok |
+### Invarianti preservate
 
-→ serve una regola: label soft-key IT max ~95 px (≈8 caratteri maiuscoli), `CONFERMA` va abbreviato in `OK`/`SCEGLI`.
+Non sono stati tradotti i token macchina del protocollo e delle euristiche:
+`"reminder"`, `"All day"`, `"active"`, `"break"`, `"ready"`, suffissi
+`" sent"`/`" received"`, tipi card, UUID, chiavi JSON/NVS e stati del file
+transfer. Questo evita di rompere:
 
-### Copertura glifi (verificata, non assunta)
+* il filtro reminder/all-day;
+* il riconoscimento delle card Block;
+* la direzione delle frecce di trasferimento;
+* il contratto BLE con l'app.
 
-I font UI **non** sono ASCII-only: `tools/subset_epd_font.py:42` emette tre intervalli e gli header li confermano — `{0x20,0x7E} {0xA0,0xFF} {0x100,0x17F}`, 319 glifi (`src/fonts/ubuntu_12_regular_ascii.h:911-915`, `ubuntu_12_bold_ascii.h:968-972`, `ubuntu_10_regular_ascii.h:753-757`).
-- Accenti italiani presenti con bitmap reali: `à U+00E0 (11x20)`, `è U+00E8`, `é U+00E9`, `ì U+00EC`, `ò U+00F2`, `ù U+00F9`, `À U+00C0 (17x24)`, `È U+00C8` (`ubuntu_12_regular_ascii.h`, righe glifo con `dataLength > 0`).
-- `° U+00B0` presente in tutti e tre i font (regular 8x7, bold 9x7, small 7x6).
-- `· U+00B7` presente → il workaround "middle dot stampato come quadrato 3x3" e il commento "UI fonts are ASCII-only subsets" in `ReaderScene.cpp:928-929` sono **obsoleti**.
-- Assente: `€ U+20AC` (fuori dai tre intervalli). Se serve, va rigenerato l'header (vedi §3).
-- Il decoder UTF-8 di `Gfx::nextCodepoint` gestisce già i multibyte (`Gfx.cpp:152-185`), fallback `'?'` (`Gfx.cpp:245`, `:257`).
+Le intestazioni canoniche Today ricevute come `TODAY`, `TONIGHT`, `TOMORROW`
+sono confrontate nella forma di protocollo e tradotte soltanto al render in
+`OGGI`, `STASERA`, `DOMANI`.
 
-### Meccanismo proposto
+I formatter variadici conservano anche gli argomenti non mostrati nella forma
+italiana: `%.0s` consuma il suffisso plurale inglese senza stamparlo. Rimuovere
+semplicemente `%s` avrebbe fatto leggere a `%lu` un puntatore, causando
+comportamento indefinito.
 
-```c
-// src/i18n.h — nessuna allocazione, tutto in .rodata
-enum Str : uint16_t { STR_BACK, STR_SYNC, ..., STR_COUNT };
-enum Lang : uint8_t { LANG_EN, LANG_IT, LANG_COUNT };
-extern const char* const kStr[LANG_COUNT][STR_COUNT];   // ~263 slot
-inline const char* T(Str s);                            // legge gLang (uint8_t in BSS)
+### Dati ancora prodotti dall'iPhone
+
+`TodayStore::Item::time`, `TodayStore::syncLine` e
+`BlockStatusStore::endsAtLabel` arrivano già formattati dal companion. La
+localizzazione firmware non può trasformarli senza perdere semantica; l'app
+Lume italiana li produce nel formato locale/24 ore. I valori canonici usati
+per filtri e routing restano invece indipendenti dalla lingua.
+
+### Build e release
+
+Build locale:
+
+```sh
+cd xphone-os
+../.venv/bin/pio run -e lume-x3-it
+../.venv/bin/pio run -e lume-x3-en
 ```
-- Lingua persistita in NVS namespace `"xphone"` con chiave `"lang"` (≤15 char, come le altre: `Sleep.cpp:44-70`, `IconStyle.cpp:9-10`); caricamento lazy con il pattern `ensureLoaded()` di `IconStyle.cpp:21-29`.
-- `softKeys()`: sostituire ogni `static constexpr const char* kX[4]` con `static const char* buf[4]; buf[0]=T(STR_BACK); …; return buf;` — sicuro perché `softKeys()` è invocato solo dal main loop (`Scene.cpp:181`) e i puntatori puntano a flash.
-- Switch runtime: nuova voce in `SettingsScene` (`:38` per la lista, `:311-316` come modello per il sotto-view a `PREV/NEXT`), poi `IconStyle`-style `set()` + `markDirty()`; il cambio è full-panel, quindi `markDirty()` senza rect.
-- Costo flash misurato/stimato: stringhe EN attuali 3.668 B (213 uniche, media 17,2 char); versione IT ≈ 4.400 B (+20%); due tabelle di puntatori 213×4 B = 852 B ciascuna → **≈ 6,1 KB** aggiunti, su ~4 MB liberi: irrilevante.
-- Nessun impatto su heap/loop: solo dereference di puntatori costanti.
 
-### Punti dove la lingua non basta
+Il workflow `.github/workflows/firmware-release.yml` compila entrambi gli env e
+pubblica:
 
-| Punto | Evidenza | Problema |
-|---|---|---|
-| Ora/data | `BlockStatusStore.h:28-30`, `TodayStore.h:33`, `:51`, `CompanionProtocol.h:106-108` | `endsAtLabel`, `Item::time`, `syncLine` arrivano **già formattati dall'iPhone** in 12h US (`"10:30 AM"`, `"Synced 9:41 AM"`): il device non può localizzarli; va cambiata l'app iOS |
-| Confronto semantico su stringa inglese | `PrioritiesScene.cpp:449` `strcmp(item.time,"All day")`, `:448` e `TodayScene.cpp:127/139/317` `strcmp(item.kind,"reminder")` | se il telefono localizza, il device rompe il filtro → serve un flag booleano nel protocollo |
-| Direzione transfer | `SyncIndicator.h:33-40` classifica per suffisso `" sent"` / `" received"` sui messaggi BLE | localizzare `statusMessage` rompe le frecce → separare `direction` dal testo |
-| Plurali | `SettingsScene.cpp:361` `"%d file%s"`, `FileTransferScene.cpp:314-315` `"%u request%s"` | l'hack `"s"`/`""` non funziona in italiano (file→file, richiesta→richieste): serve una forma per numero |
-| Orologio 24h | `AboutScene.cpp:58` `"%02u:%02u"` da `CLOCK_STORE.minutesIntoDay` (`ClockStore.h:20`) | l'unico orario formato sul device è già 24h; nessun RTC (`Sleep.cpp:89-90`) |
-| Giorni settimana | `ReaderScene.cpp:1013` `"MTWTFSS"` | va sostituito con `"LMMGVSD"` |
-| Rail BLE | 36+14 stringhe in `src/ble/` | testo tecnico mostrato all'utente; include `"Pair X4 …"` su X3 |
+* `update_it.bin`, `update_en.bin`;
+* `lume-x3-it.bin`, `lume-x3-en.bin` e copie versionate;
+* `lume-x3-it.zip`, `lume-x3-en.zip`, ciascuno con il proprio `update.bin`;
+* `SHA256SUMS.txt`;
+* `latest.json` con `assets.x3.defaultLocale = "it"` e le due entry
+  `assets.x3.locales.it/en`.
 
-**Complessità: media.** File da toccare: nuovi `src/i18n.{h,cpp}`, poi tutte le 11 scene, `Scene.cpp`, `Sleep.cpp`, `main.cpp`, `StatusBar.h`, `SyncIndicator.h`, `SettingsScene.cpp` (switcher), `src/ble/*.cpp` (rail). Rischi: overflow layout (soft-key, `truncateToWidth` già presente per le liste, es. `PrioritiesScene.cpp:374`); regressione delle frecce sync; stringhe generate dal telefono restano inglesi finché non si cambia l'app.
+Le immagini dirette con suffisso lingua si scelgono da
+Settings → SD Firmware Update. Il boot updater storico cerca invece il nome
+esatto `update.bin`: per quel percorso usare lo zip della lingua scelta.
 
+### Verifica hardware residua
+
+La build e l'isolamento delle lingue sono verificati. Il flash e la revisione
+visiva italiana sul vero X3 restano da eseguire quando il device è collegato:
+controllare soprattutto larghezza delle soft-key, righe About più lunghe,
+messaggi vuoti e glifi accentati. Non dichiarare questa parte completata sulla
+sola base della build.
 ---
 
 ## 2. Lettura in orizzontale (landscape)
@@ -234,7 +248,7 @@ Due strade, con un vincolo hardware decisivo:
 
 | Feature | Complessità | File principali | Prerequisiti |
 |---|---|---|---|
-| i18n IT + switcher runtime | media | nuovi `src/i18n.{h,cpp}`; `src/scenes/*.cpp` (11), `Scene.cpp`, `Sleep.cpp`, `main.cpp`, `StatusBar.h`, `SyncIndicator.h`, `src/ble/*.cpp` | glossario ≤95 px per soft-key; disaccoppiare `SyncIndicator::classify` dal testo; flag booleani al posto di `strcmp("All day"/"reminder")`; app iOS che invii orari localizzati |
+| i18n IT/EN a compile time | **implementata; hardware visuale pendente** | `src/LumeLocale.h`, `src/scenes/*.cpp`, `Scene.cpp`, `Sleep.cpp`, `main.cpp`, `platformio.ini`, workflow release | build `lume-x3-it/en`; token protocollo lasciati canonici; app responsabile dei campi già formattati |
 | Font UI con nuovi range (€, altri) | media | nuovo `fontconvert` non compresso; `tools/subset_epd_font.py:42`; `src/fonts/*`, `Fonts.cpp` | tool di generazione (assente in repo) |
 | Font reader aggiuntivi (flash) | media | nuovo `fontconvert` 2bpp+DEFLATE; `reader/ReaderFonts.{h,cpp}`, `ReaderScene.cpp:645-656`, `:76` | ~50-80 KB flash per stile-misura; consapevolezza che `fontId` è chiave cache `section.bin` |
 | Font reader da SD a runtime | alta | `FontDecompressor.{h,cpp}`, `EpdFont.cpp`, nuovo `SdCardFont` | sorgente inflate streaming da file; budget RAM (max gruppo 38 KB + tabella glifi 17 KB) |

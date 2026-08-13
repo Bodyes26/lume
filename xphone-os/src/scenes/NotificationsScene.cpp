@@ -65,10 +65,10 @@ const char* const* NotificationsScene::softKeys() const {
   // one stray press can no longer wipe the list. With the header SYNC pill
   // selected (_sel == -1) the CONFIRM tab relabels to SYNC — the bar repaints
   // with every scene repaint, so the label follows the cursor for free.
-  static constexpr const char* kList[4] = {"BACK", "OPEN", "UP", "DOWN"};
-  static constexpr const char* kListSync[4] = {"BACK", "SYNC", "UP", "DOWN"};
-  static constexpr const char* kListSyncEmpty[4] = {"BACK", "SYNC", nullptr, nullptr};
-  static constexpr const char* kDetail[4] = {"BACK", "CLEAR", "PREV", "NEXT"};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kListSync[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kListSyncEmpty[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), nullptr, nullptr};
+  static constexpr const char* kDetail[4] = {L10N("BACK", "INDIETRO"), L10N("CLEAR", "ELIMINA"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
   if (_view == View::Detail) return kDetail;
   if (_sel < 0) return NOTIFICATION_STORE.count() > 0 ? kListSync : kListSyncEmpty;
   return kList;
@@ -268,7 +268,7 @@ void NotificationsScene::renderList(Gfx& gfx) {
 
   // Header.
   char line[192];
-  snprintf(line, sizeof(line), "Notifications (%d)", count);
+  snprintf(line, sizeof(line), L10N("Notifications (%d)", "Notifiche (%d)"), count);
   gfx.drawText(kFontBold, kMarginX, 8, line);
 
   // SYNC pill (top-right, where the old "n-m" scroll range indicator lived —
@@ -279,7 +279,7 @@ void NotificationsScene::renderList(Gfx& gfx) {
   {
     const bool selected = _sel < 0;
     const bool flashing = _syncFlashUntilMs != 0;
-    const char* label = flashing ? "SYNCING" : "SYNC";
+    const char* label = flashing ? L10N("SYNCING", "SINCRONIZZO") : L10N("SYNC", "SINC");
     const int textW = gfx.textWidth(kFontSmall, label);
     const int pillW = textW + 24;
     const int pillX = w - kMarginX - pillW;
@@ -296,8 +296,8 @@ void NotificationsScene::renderList(Gfx& gfx) {
   gfx.fillRect(0, kHeaderH - 2, w, 2, true);
 
   if (count == 0) {
-    gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), "No notifications");
-    gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 + 6, "Notifications from iPhone land here");
+    gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), L10N("No notifications", "Nessuna notifica"));
+    gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 + 6, L10N("Notifications from iPhone land here", "Le notifiche di iPhone appaiono qui"));
     return;
   }
 
@@ -354,9 +354,9 @@ void NotificationsScene::renderDetail(Gfx& gfx, const int count) {
   }
 
   // Header: title + "n of m" position in the detail slot.
-  gfx.drawText(kFontBold, kMarginX, 8, "Notification");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("Notification", "Notifica"));
   char pos[24];
-  snprintf(pos, sizeof(pos), "%d of %d", _sel + 1, count);
+  snprintf(pos, sizeof(pos), L10N("%d of %d", "%d di %d"), _sel + 1, count);
   gfx.drawText(kFontRegular, w - kMarginX - gfx.textWidth(kFontRegular, pos), 8, pos);
   gfx.fillRect(0, kHeaderH - 2, w, 2, true);
 
@@ -376,7 +376,7 @@ void NotificationsScene::renderDetail(Gfx& gfx, const int count) {
 
   // Title: bold, word-wrapped (store field is 56 bytes -> <= 3 lines here).
   const int titleLines =
-      gfx.drawTextWrapped(kFontBold, kMarginX, y, entry.title[0] ? entry.title : "(no title)", textW, 3);
+      gfx.drawTextWrapped(kFontBold, kMarginX, y, entry.title[0] ? entry.title : L10N("(no title)", "(senza titolo)"), textW, 3);
   y += (titleLines > 0 ? titleLines : 1) * gfx.lineHeight(kFontBold) + 8;
 
   // Message: regular, word-wrapped into whatever fits above the soft keys;

@@ -34,6 +34,7 @@
 #include "NotificationStore.h"
 #include "PrioritiesStore.h"
 #include "Scene.h"
+#include "LumeLocale.h"
 #include "TodayStore.h"
 #include "WorkoutStore.h"
 #include "SdUpdate.h"
@@ -75,7 +76,7 @@ static void drawBootSplash(Gfx& g) {
   constexpr int kRuleW = 56;
   const int ruleY = wordmarkY + g.lineHeight(kFontBold) + 10;
   g.fillRect(cx - kRuleW / 2, ruleY, kRuleW, 2, true);
-  g.drawTextCentered(kFontSmall, cx, ruleY + 26, "waking up...");
+  g.drawTextCentered(kFontSmall, cx, ruleY + 26, L10N("waking up...", "avvio..."));
   g.flush(EInkDisplay::FULL_REFRESH);
 }
 
@@ -529,7 +530,8 @@ static void checkPowerButton() {
     SCENES.waitFlushIdle();  // panel must be idle before this direct paint
     input.suspendTask();
     gfx.clear();
-    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, gfx.height() / 2, "Restarting...");
+    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, gfx.height() / 2,
+                         L10N("Restarting...", "Riavvio..."));
     gfx.flush(EInkDisplay::FULL_REFRESH);
     esp_restart();
   }
@@ -631,3 +633,4 @@ void loop() {
   reportRuntimeStats();          // M2.1d: 60s stack/heap/ANCS-queue audit line
   delay(10);                     // 10ms poll cadence — no periodic redraws
 }
+

@@ -24,6 +24,7 @@
 #include "../BlockStatusStore.h"
 #include "../ClockStore.h"
 #include "../NotificationFilter.h"
+#include "../LumeLocale.h"
 #include "../PrioritiesStore.h"
 #include "../WorkoutStore.h"
 #include "../TodayStore.h"
@@ -366,7 +367,7 @@ void CompanionBleService::startAdvertising() {
   advertisingWanted = true;
   if (advertising) {
     advertising->start();
-    setStatus(std::string("Advertising as ") + CompanionProtocol::deviceName());
+    setStatus(std::string(L10N("Advertising as ", "In pubblicità come ")) + CompanionProtocol::deviceName());
   }
 }
 
@@ -375,13 +376,15 @@ void CompanionBleService::stopAdvertising() {
   if (advertising) {
     advertising->stop();
   }
-  setStatus(connected ? "Connected" : "Not advertising");
+  setStatus(connected ? L10N("Connected", "Connesso") : L10N("Not advertising", "Non in pubblicità"));
 }
 
-void CompanionBleService::shutdownForTransfer() { shutdownRadio(/*releaseMemory=*/true, "File Transfer"); }
+void CompanionBleService::shutdownForTransfer() {
+  shutdownRadio(/*releaseMemory=*/true, L10N("File Transfer", "Trasferimento file"));
+}
 
 void CompanionBleService::suspendForReader() {
-  shutdownRadio(/*releaseMemory=*/false, "Reading");
+  shutdownRadio(/*releaseMemory=*/false, L10N("Reading", "Lettura"));
   releaseReaderTransients();
 }
 
@@ -410,7 +413,7 @@ void CompanionBleService::releaseReaderTransients() {
   pendingHead = 0;
   pendingCount = 0;
   std::string().swap(statusMessage);
-  statusMessage = "Bluetooth off";  // 13 chars: small-string optimized, no heap
+  statusMessage = L10N("Bluetooth off", "Bluetooth spento");  // small-string optimized, no heap
   ++revision;
   xSemaphoreGive(stateMutex);
 }
@@ -484,7 +487,7 @@ void CompanionBleService::shutdownRadio(const bool releaseMemory, const char* re
   connected = false;
   encrypted = false;
   secConnHandle = 0xffff;
-  statusMessage = std::string("Bluetooth off (") + reason + ")";
+  statusMessage = std::string(L10N("Bluetooth off (", "Bluetooth spento (")) + reason + ")";
   ++revision;
   xSemaphoreGive(stateMutex);
   advertising = nullptr;
@@ -561,7 +564,8 @@ void CompanionBleService::markConnected(bool value) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   connected = value;
   if (value && CLOCK_STORE.firstConnectMs == 0) CLOCK_STORE.firstConnectMs = millis();
-  statusMessage = connected ? "iPhone connected" : "iPhone disconnected";
+  statusMessage = connected ? L10N("iPhone connected", "iPhone connesso")
+                            : L10N("iPhone disconnected", "iPhone disconnesso");
   ++revision;
   const bool shouldAdvertise = advertisingWanted && !connected;
   xSemaphoreGive(stateMutex);
@@ -651,7 +655,7 @@ void CompanionBleService::handleEncryptionChange(ble_gap_conn_desc* desc) {
     // A repeat connection with an existing bond lands here with encrypted=1
     // and no popup — that is the normal path, not an error.
     LOG_INF("X4CMP", "BLE link encrypted bonded=%d", desc->sec_state.bonded);
-    setStatus("Paired & encrypted");
+    setStatus(L10N("Paired & encrypted", "Abbinato e cifrato"));
     return;
   }
 
@@ -669,7 +673,8 @@ void CompanionBleService::handleEncryptionChange(ble_gap_conn_desc* desc) {
   }
   xSemaphoreGive(stateMutex);
   LOG_ERR("X4CMP", "BLE pairing failed (auth complete, link not encrypted)%s", retry ? "; retrying" : "");
-  setStatus(retry ? "Pairing failed; retrying" : "Pairing failed - check iPhone");
+  setStatus(retry ? L10N("Pairing failed; retrying", "Abbinamento fallito; riprovo")
+                  : L10N("Pairing failed - check iPhone", "Abbinamento fallito: controlla iPhone"));
 #else
   (void)desc;
 #endif
@@ -705,7 +710,7 @@ void CompanionBleService::handleCardWrite(BLECharacteristic* characteristic) {
   if (!characteristic) return;
   String value = characteristic->getValue();
   if (value.length() == 0 || value.length() > CompanionProtocol::MAX_CARD_BYTES) {
-    setStatus("Rejected card payload");
+    setStatus(L10N("Rejected card payload", "Dati scheda rifiutati"));
     return;
   }
 
@@ -760,7 +765,7 @@ void CompanionBleService::processPending() {
       xSemaphoreTake(stateMutex, portMAX_DELAY);
       securityPending = false;
       xSemaphoreGive(stateMutex);
-      setStatus("Pairing with iPhone...");
+      setStatus(L10N("Pairing with iPhone...", "Abbino iPhone..."));
     } else {
       LOG_ERR("X4CMP", "ble_gap_security_initiate conn=%u failed rc=%d", handle, rc);
       bool retry = false;
@@ -775,7 +780,7 @@ void CompanionBleService::processPending() {
       xSemaphoreGive(stateMutex);
       if (!retry) {
         char failMsg[48];
-        snprintf(failMsg, sizeof(failMsg), "Pairing failed (rc=%d)", rc);
+        snprintf(failMsg, sizeof(failMsg), L10N("Pairing failed (rc=%d)", "Abbinamento fallito (rc=%d)"), rc);
         setStatus(failMsg);
       }
     }
@@ -785,7 +790,7 @@ void CompanionBleService::processPending() {
 
 bool CompanionBleService::applyCardPayload(const std::string& payload) {
   if (payload.empty() || payload.size() > CompanionProtocol::MAX_CARD_BYTES) {
-    setStatus("Rejected card payload");
+    setStatus(L10N("Rejected card payload", "Dati scheda rifiutati"));
     return false;
   }
 
@@ -793,7 +798,7 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   const DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     LOG_ERR("X4CMP", "Card JSON parse error: %s", err.c_str());
-    setStatus("Bad card JSON");
+    setStatus(L10N("Bad card JSON", "JSON scheda non valido"));
     return false;
   }
 
@@ -801,7 +806,7 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   if (hasPrefix(type, "camera.image.")) {
     // Camera transfer is stripped in xphone-os M2 — drop gracefully so an
     // unmodified iOS app doesn't wedge (it just sees no preview progress).
-    setStatus("Camera not supported");
+    setStatus(L10N("Camera not supported", "Fotocamera non supportata"));
     return false;
   }
 
@@ -827,7 +832,7 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     }
     NOTIFICATION_FILTER.set(bundleIds, bundleCount);
     char message[48];
-    std::snprintf(message, sizeof(message), "Notifications: %u app(s) hidden",
+    std::snprintf(message, sizeof(message), L10N("Notifications: %u app(s) hidden", "Notifiche: %u app nascoste"),
                   static_cast<unsigned>(bundleCount));
     setStatus(message);
     LOG_INF("X4CMP", "Notification blocklist applied apps=%u", static_cast<unsigned>(bundleCount));
@@ -871,7 +876,7 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
 
   auto* next = new (std::nothrow) CompanionCardState();
   if (!next) {
-    setStatus("Card parse OOM");
+    setStatus(L10N("Card parse OOM", "Memoria esaurita leggendo la scheda"));
     return false;
   }
 
@@ -1042,7 +1047,7 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   next->revision = card.revision + 1;
   card = *next;
-  statusMessage = "Card received";
+  statusMessage = "Card received";  // Protocol-neutral token consumed by SyncIndicator.
   ++revision;
   xSemaphoreGive(stateMutex);
 
@@ -1068,7 +1073,7 @@ bool CompanionBleService::sendAction(std::size_t actionIndex) {
     statusMessage = "Action sent";
     shouldNotify = connected && actionCharacteristic;
   } else {
-    statusMessage = "No action selected";
+    statusMessage = L10N("No action selected", "Nessuna azione selezionata");
   }
   ++revision;
   xSemaphoreGive(stateMutex);
@@ -1117,7 +1122,7 @@ bool CompanionBleService::sendPriorityToggle(const char* itemId, const bool done
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   sequence = ++actionSequence;
-  statusMessage = connected && actionCharacteristic ? "Priority update sent" : "Companion unavailable";
+  statusMessage = connected && actionCharacteristic ? "Priority update sent" : L10N("Companion unavailable", "Lume non disponibile");
   shouldNotify = connected && actionCharacteristic;
   ++revision;
   xSemaphoreGive(stateMutex);
@@ -1153,7 +1158,7 @@ bool CompanionBleService::sendWorkoutSet(const char* itemId, const int done) {
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   sequence = ++actionSequence;
-  statusMessage = connected && actionCharacteristic ? "Workout update sent" : "Companion unavailable";
+  statusMessage = connected && actionCharacteristic ? "Workout update sent" : L10N("Companion unavailable", "Lume non disponibile");
   shouldNotify = connected && actionCharacteristic;
   ++revision;
   xSemaphoreGive(stateMutex);
@@ -1183,7 +1188,7 @@ bool CompanionBleService::sendCommand(const char* type) {
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   sequence = ++actionSequence;
-  statusMessage = connected && actionCharacteristic ? "Command sent" : "Companion unavailable";
+  statusMessage = connected && actionCharacteristic ? "Command sent" : L10N("Companion unavailable", "Lume non disponibile");
   shouldNotify = connected && actionCharacteristic;
   ++revision;
   xSemaphoreGive(stateMutex);
@@ -1211,7 +1216,7 @@ bool CompanionBleService::sendBlockCommand(const char* type, uint16_t minutes, c
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   sequence = ++actionSequence;
-  statusMessage = connected && actionCharacteristic ? "Block command sent" : "Block unavailable";
+  statusMessage = connected && actionCharacteristic ? "Block command sent" : L10N("Block unavailable", "Focus non disponibile");
   shouldNotify = connected && actionCharacteristic;
   ++revision;
   xSemaphoreGive(stateMutex);

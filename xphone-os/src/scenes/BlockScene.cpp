@@ -23,10 +23,10 @@ struct BlockMode {
   int minutes;
 };
 constexpr BlockMode kModes[BlockScene::MODE_COUNT] = {
-    {"deep_work", "Deep Work", 30},
-    {"reading", "Reading", 45},
-    {"evening", "Evening", 60},
-    {"workout", "Workout", 60},
+    {"deep_work", L10N("Deep Work", "Focus profondo"), 30},
+    {"reading", L10N("Reading", "Lettura"), 45},
+    {"evening", L10N("Evening", "Sera"), 60},
+    {"workout", L10N("Workout", "Allenamento"), 60},
 };
 
 // CrossPoint's break chooser verbatim (BlockActivity.cpp breakChoices).
@@ -35,9 +35,9 @@ struct BreakChoice {
   const char* subtitle;
 };
 constexpr BreakChoice kBreaks[BlockScene::BREAK_COUNT] = {
-    {"Keep blocking", "Return to countdown"},
-    {"5 min break", "Short reset"},
-    {"Stop now", "End block"},
+    {L10N("Keep blocking", "Continua il focus"), L10N("Return to countdown", "Torna al conto alla rovescia")},
+    {L10N("5 min break", "Pausa di 5 min"), L10N("Short reset", "Breve pausa")},
+    {L10N("Stop now", "Interrompi ora"), L10N("End block", "Termina il focus")},
 };
 
 // CrossPoint's duration bounds/step (BlockActivity.cpp:39-41). CrossPoint has
@@ -164,20 +164,20 @@ void BlockScene::onEnter() {
   // main.cpp owns BLE begin/advertising): ask the phone for a fresh Block
   // status so the card is not stale from a previous session.
   if (COMPANION_BLE.isConnected()) {
-    _localMsg = COMPANION_BLE.sendBlockStatus() ? "Requesting Block status..." : "Connect Companion to sync.";
+    _localMsg = COMPANION_BLE.sendBlockStatus() ? L10N("Requesting Block status...", "Richiedo lo stato Focus...") : L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
   } else {
-    _localMsg = "Connect Companion to sync.";
+    _localMsg = L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
   }
   _zeroConfirmSent = false;
 }
 
 const char* const* BlockScene::softKeys() const {
-  static constexpr const char* kMainReady[4] = {"BACK", "START", "MODE", nullptr};
+  static constexpr const char* kMainReady[4] = {L10N("BACK", "INDIETRO"), L10N("START", "AVVIA"), L10N("MODE", "MODALITA"), nullptr};
   // Active: no direct STOP — stopping goes through the break chooser ("Stop
   // now"), exactly CrossPoint's flow. BREAK stays on the same physical
   // button (front-LEFT, slot 2) the user already knows as MODE when idle.
-  static constexpr const char* kMainActive[4] = {"BACK", nullptr, "BREAK", nullptr};
-  static constexpr const char* kList[4] = {"BACK", "SELECT", "UP", "DOWN"};
+  static constexpr const char* kMainActive[4] = {L10N("BACK", "INDIETRO"), nullptr, L10N("BREAK", "PAUSA"), nullptr};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("SELECT", "SCEGLI"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
   if (_view == View::Main) return _activeCache ? kMainActive : kMainReady;
   return kList;
 }
@@ -216,10 +216,10 @@ int BlockScene::remainingNowMin(const uint32_t now) const {
 void BlockScene::startBlock() {
   const BlockMode& mode = kModes[clampInt(_modeSel, 0, MODE_COUNT - 1)];
   if (COMPANION_BLE.sendBlockStart(static_cast<uint16_t>(_durationMin), mode.id)) {
-    _localMsg = "Starting selected mode...";
+    _localMsg = L10N("Starting selected mode...", "Avvio la modalità scelta...");
     setPending(Pending::Start);
   } else {
-    _localMsg = "Connect Companion to start.";
+    _localMsg = L10N("Connect Companion to start.", "Collega Lume per iniziare.");
   }
   markDirty();
 }
@@ -236,20 +236,20 @@ void BlockScene::startDeepWork() {
 
 void BlockScene::confirmBreakChoice() {
   if (_breakSel == 0) {
-    _localMsg = "Still blocking.";
+    _localMsg = L10N("Still blocking.", "Focus ancora attivo.");
   } else if (_breakSel == 1) {
     if (COMPANION_BLE.sendBlockBreak(5)) {
-      _localMsg = "Requesting 5 minute break...";
+      _localMsg = L10N("Requesting 5 minute break...", "Richiedo 5 minuti di pausa...");
       setPending(Pending::Break);
     } else {
-      _localMsg = "Connect Companion to pause.";
+      _localMsg = L10N("Connect Companion to pause.", "Collega Lume per la pausa.");
     }
   } else {
     if (COMPANION_BLE.sendBlockStop()) {
-      _localMsg = "Stopping Block...";
+      _localMsg = L10N("Stopping Block...", "Termino il focus...");
       setPending(Pending::Stop);
     } else {
-      _localMsg = "Connect Companion to stop.";
+      _localMsg = L10N("Connect Companion to stop.", "Collega Lume per terminare.");
     }
   }
   _view = View::Main;
@@ -271,16 +271,16 @@ void BlockScene::tickTransients(const uint32_t now) {
         _optimisticActive = true;
         _optimisticReady = false;
         latchEnd(_durationMin);
-        _localMsg = "Blocking (awaiting phone).";
+        _localMsg = L10N("Blocking (awaiting phone).", "Focus attivo (attendo iPhone).");
         break;
       case Pending::Stop:
         _optimisticReady = true;
         _optimisticActive = false;
         _endValid = false;
-        _localMsg = "Block stopped (awaiting phone).";
+        _localMsg = L10N("Block stopped (awaiting phone).", "Focus terminato (attendo iPhone).");
         break;
       case Pending::Break:
-        _localMsg = "Break requested.";
+        _localMsg = L10N("Break requested.", "Pausa richiesta.");
         break;
       case Pending::None:
         break;
@@ -306,7 +306,7 @@ void BlockScene::tickTransients(const uint32_t now) {
     _optimisticActive = false;
     _endValid = false;
     _zeroConfirmSent = false;
-    _localMsg = "Block finished.";
+    _localMsg = L10N("Block finished.", "Focus terminato.");
     markDirty();
   }
 }
@@ -397,7 +397,7 @@ void BlockScene::handleInput(Input& in) {
 
 void BlockScene::renderHeader(Gfx& gfx) const {
   const int w = gfx.width();
-  gfx.drawText(kFontBold, kMarginX, 8, "Block");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("Block", "Focus"));
   // Transfer transients (command sent / card received) render as the paired
   // up/down arrows; routine BLE status stays OFF the header (same treatment
   // as Priorities/Workout/Today) — the scene's own message line carries
@@ -469,7 +469,7 @@ void BlockScene::renderReady(Gfx& gfx, const BlockStatusStore::Status& card) con
   const BlockStatusStore::Status stats = BLOCK_STATUS.get();
   if (stats.total > 0 || stats.blocksToday > 0) {
     char line[56];
-    snprintf(line, sizeof(line), "Today %d      Streak %d", stats.blocksToday, stats.streak);
+    snprintf(line, sizeof(line), L10N("Today %d      Streak %d", "Oggi %d      Serie %d"), stats.blocksToday, stats.streak);
     gfx.drawTextCentered(kFontSmall, cx, heroBandTop, line);
     heroBandTop += gfx.lineHeight(kFontSmall) + 10;
   }
@@ -490,7 +490,7 @@ void BlockScene::renderActive(Gfx& gfx, const BlockStatusStore::Status& card) {
   // The snapshot carries both provenances (fromCard distinguishes them), so
   // the old fresh-card/seeded duality collapses: preset and onBreak read the
   // same either way.
-  const char* title = presetTitle(card, "Deep Work");
+  const char* title = presetTitle(card, L10N("Deep Work", "Focus profondo"));
 
   // A LIVE countdown exists only once we've latched an end from a real card
   // (or the card still carries remainingMinutes). A pure wake-from-sleep
@@ -523,7 +523,7 @@ void BlockScene::renderActive(Gfx& gfx, const BlockStatusStore::Status& card) {
     char number[16];
     snprintf(number, sizeof(number), "%d", remaining);
     gfx.drawTextCentered(kFontBold, cx, panelY + 20, number);
-    gfx.drawTextCentered(kFontBold, cx, panelY + 52, onBreak ? "min break" : "min left");
+    gfx.drawTextCentered(kFontBold, cx, panelY + 52, onBreak ? L10N("min break", "min pausa") : L10N("min left", "min rimasti"));
     const int barW = panelW - 40;
     const int progress = duration > 0 ? clampInt(((duration - remaining) * barW) / duration, 0, barW) : barW / 2;
     if (!onBreak && progress > 0) gfx.fillRoundedRect(panelX + 20, panelY + 94, progress, 8, 4, true);
@@ -537,19 +537,19 @@ void BlockScene::renderActive(Gfx& gfx, const BlockStatusStore::Status& card) {
     _shownRemaining = -1;  // no live minute on glass yet
     char endLabel[32];
     if (card.endsAtLabel[0]) {
-      snprintf(endLabel, sizeof(endLabel), "until %s", card.endsAtLabel);
+      snprintf(endLabel, sizeof(endLabel), L10N("until %s", "fino alle %s"), card.endsAtLabel);
     } else {
-      snprintf(endLabel, sizeof(endLabel), "%s", onBreak ? "on a break" : "active");
+      snprintf(endLabel, sizeof(endLabel), "%s", onBreak ? L10N("on a break", "in pausa") : L10N("active", "attivo"));
     }
     gfx.drawTextCentered(kFontBold, cx, panelY + 34, endLabel);
-    gfx.drawTextCentered(kFontRegular, cx, panelY + 78, "updating...");
+    gfx.drawTextCentered(kFontRegular, cx, panelY + 78, L10N("updating...", "aggiorno..."));
   }
 }
 
 void BlockScene::renderModes(Gfx& gfx) const {
   const int w = gfx.width();
   const int cx = w / 2;
-  gfx.drawTextCentered(kFontRegular, cx, kHeaderH + 14, "Choose a preset");
+  gfx.drawTextCentered(kFontRegular, cx, kHeaderH + 14, L10N("Choose a preset", "Scegli una modalità"));
 
   const int rowH = 76;
   const int rowGap = 12;
@@ -574,7 +574,7 @@ void BlockScene::renderModes(Gfx& gfx) const {
 void BlockScene::renderBreak(Gfx& gfx) const {
   const int w = gfx.width();
   const int cx = w / 2;
-  gfx.drawTextCentered(kFontBold, cx, kHeaderH + 20, "Take a break?");
+  gfx.drawTextCentered(kFontBold, cx, kHeaderH + 20, L10N("Take a break?", "Fare una pausa?"));
 
   const int rowH = 62;
   const int rowGap = 18;
@@ -616,19 +616,19 @@ void BlockScene::render(Gfx& gfx) {
       _optimisticReady = false;
       switch (_pending) {
         case Pending::Start:
-          _localMsg = nowActive ? "" : "Phone did not start the block.";
+          _localMsg = nowActive ? "" : L10N("Phone did not start the block.", "iPhone non ha avviato il focus.");
           break;
         case Pending::Stop:
-          _localMsg = nowActive ? "Phone is still blocking." : "Block stopped.";
+          _localMsg = nowActive ? L10N("Phone is still blocking.", "Il focus su iPhone è ancora attivo.") : L10N("Block stopped.", "Focus terminato.");
           break;
         case Pending::Break:
-          _localMsg = isBreakCard(card) ? "On a break." : "";
+          _localMsg = isBreakCard(card) ? L10N("On a break.", "In pausa.") : "";
           break;
         case Pending::None:
           // No in-flight command, but the fresh card still supersedes any
           // stale status line — notably onEnter's "Requesting Block
           // status...", which otherwise persists over an active block.
-          _localMsg = isBreakCard(card) ? "On a break." : (nowActive ? "" : "Start a phone block.");
+          _localMsg = isBreakCard(card) ? L10N("On a break.", "In pausa.") : (nowActive ? "" : L10N("Start a phone block.", "Avvia il focus su iPhone."));
           break;
       }
       _pending = Pending::None;
@@ -663,7 +663,7 @@ void BlockScene::render(Gfx& gfx) {
   // down, keep the existing connect hint. A real card, an in-flight command,
   // or an optimistic state all take precedence.
   if (!isBlockCard(card) && !_optimisticActive && !_optimisticReady && !seedActive && _pending == Pending::None) {
-    _localMsg = COMPANION_BLE.isConnected() ? "Syncing..." : "Connect Companion to sync.";
+    _localMsg = COMPANION_BLE.isConnected() ? L10N("Syncing...", "Sincronizzo...") : L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
   }
 
   renderHeader(gfx);

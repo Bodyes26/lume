@@ -85,7 +85,7 @@ void WorkoutScene::onEnter() {
   _sel = 0;
   _scroll = 0;
   if (COMPANION_BLE.isConnected() && COMPANION_BLE.sendWorkoutSyncRequest()) {
-    _localMsg = "Requesting workout...";
+    _localMsg = L10N("Requesting workout...", "Richiedo l'allenamento...");
   } else {
     _localMsg = "";
   }
@@ -98,8 +98,8 @@ void WorkoutScene::onExit() {
 void WorkoutScene::flushPendingSend() { sendPendingNow(); }
 
 const char* const* WorkoutScene::softKeys() const {
-  static constexpr const char* kList[4] = {"BACK", "+SET", "UP", "DOWN"};
-  static constexpr const char* kEmpty[4] = {"BACK", "SYNC", nullptr, nullptr};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("+SET", "+SERIE"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kEmpty[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), nullptr, nullptr};
   return WORKOUT_STORE.count() > 0 ? kList : kEmpty;
 }
 
@@ -143,7 +143,7 @@ void WorkoutScene::handleInput(Input& in) {
     if (count > 0) {
       bumpSelected(+1);  // +SET: the big center button counts a set too
     } else {
-      _localMsg = COMPANION_BLE.sendWorkoutSyncRequest() ? "Requesting workout..." : "";
+      _localMsg = COMPANION_BLE.sendWorkoutSyncRequest() ? L10N("Requesting workout...", "Richiedo l'allenamento...") : "";
       markDirty();
     }
     return;
@@ -188,7 +188,7 @@ void WorkoutScene::render(Gfx& gfx) {
   if (_sel > count - 1) _sel = count > 0 ? count - 1 : 0;
 
   // --- Header ---------------------------------------------------------------
-  gfx.drawText(kFontBold, kMarginX, 8, "Workout");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("Workout", "Allenamento"));
   // Transfer transients render as the paired up/down arrows; routine BLE
   // status stays OFF the header (same treatment as Block/Priorities/Today).
   const std::string msg = COMPANION_BLE.getStatusMessage();
@@ -198,13 +198,13 @@ void WorkoutScene::render(Gfx& gfx) {
   // --- Empty state ------------------------------------------------------------
   if (count == 0) {
     const int cy = h / 2;
-    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), "Today's workout");
+    gfx.drawTextCentered(kFontBold, w / 2, cy - 2 * gfx.lineHeight(kFontBold), L10N("Today's workout", "Allenamento di oggi"));
     const char* line = _localMsg[0]                  ? _localMsg
-                       : COMPANION_BLE.isConnected() ? "Syncing..."
-                                                     : "Connect Companion to sync.";
+                       : COMPANION_BLE.isConnected() ? L10N("Syncing...", "Sincronizzo...")
+                                                     : L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
     gfx.drawTextCentered(kFontRegular, w / 2, cy - gfx.lineHeight(kFontRegular) / 2, line);
     gfx.drawTextCentered(kFontSmall, w / 2, cy + gfx.lineHeight(kFontRegular) + 6,
-                         "Set today's workout in the companion app.");
+                         L10N("Set today's workout in the companion app.", "Imposta l'allenamento di oggi in Lume."));
     return;
   }
 
@@ -213,15 +213,15 @@ void WorkoutScene::render(Gfx& gfx) {
   WORKOUT_STORE.tally(doneEx, total);
   const int subY = kHeaderH + 10;
   const bool complete = doneEx == total;
-  gfx.drawText(kFontBold, kMarginX, subY, complete ? "Workout complete!" : "Today");
+  gfx.drawText(kFontBold, kMarginX, subY, complete ? L10N("Workout complete!", "Allenamento completato!") : L10N("Today", "Oggi"));
   char progress[32];
-  snprintf(progress, sizeof(progress), "%d / %d done", doneEx, total);
+  snprintf(progress, sizeof(progress), L10N("%d / %d done", "%d / %d completati"), doneEx, total);
   gfx.drawText(kFontRegular, w - kMarginX - gfx.textWidth(kFontRegular, progress), subY, progress);
 
   const int syncY = subY + gfx.lineHeight(kFontBold) + 2;
   // Transients win; otherwise the set-counting instruction (the edge buttons
   // are not discoverable without it).
-  const char* syncLine = _localMsg[0] ? _localMsg : "Press left (-) and right (+) to count sets.";
+  const char* syncLine = _localMsg[0] ? _localMsg : L10N("Press left (-) and right (+) to count sets.", "Usa sinistra (-) e destra (+) per le serie.");
   char sync[96];
   truncateToWidth(gfx, kFontSmall, syncLine, w - 2 * kMarginX - 96, sync, sizeof(sync));
   gfx.drawText(kFontSmall, kMarginX, syncY, sync);
@@ -242,7 +242,7 @@ void WorkoutScene::render(Gfx& gfx) {
   if (count > perPage) {
     char range[24];
     const int last = _scroll + perPage < count ? _scroll + perPage : count;
-    snprintf(range, sizeof(range), "%d-%d of %d", _scroll + 1, last, count);
+    snprintf(range, sizeof(range), L10N("%d-%d of %d", "%d-%d di %d"), _scroll + 1, last, count);
     gfx.drawText(kFontSmall, w - kMarginX - gfx.textWidth(kFontSmall, range), syncY, range);
   }
 
@@ -286,7 +286,7 @@ void WorkoutScene::render(Gfx& gfx) {
       drawPips(gfx, textX, line2Y + (gfx.lineHeight(kFontSmall) - 12) / 2, item.sets, item.done);
     } else {
       char caption[32];
-      snprintf(caption, sizeof(caption), exDone ? "done" : "%d sets", item.sets);
+      snprintf(caption, sizeof(caption), exDone ? L10N("done", "fatto") : L10N("%d sets", "%d serie"), item.sets);
       gfx.drawText(kFontSmall, textX, line2Y, caption);
     }
     y += rowH;
@@ -309,7 +309,7 @@ bool WorkoutScene::renderDormant(Gfx& gfx) {
   // (name + set count) differ. The sleep screen is ONE design with swappable
   // list content, not the workout app screen.
   const int titleY = 52;
-  gfx.drawTextCentered(kFontBold, cx, titleY, "Today's workout");
+  gfx.drawTextCentered(kFontBold, cx, titleY, L10N("Today's workout", "Allenamento di oggi"));
   constexpr int kRuleW = 56;
   gfx.fillRect(cx - kRuleW / 2, titleY + gfx.lineHeight(kFontBold) + 10, kRuleW, 2, true);
 
@@ -350,7 +350,7 @@ bool WorkoutScene::renderDormant(Gfx& gfx) {
   }
   if (overflow) {
     char more[24];
-    snprintf(more, sizeof(more), "+%d more", count - rows);
+    snprintf(more, sizeof(more), L10N("+%d more", "altri %d"), count - rows);
     gfx.drawTextCentered(kFontSmall, cx, y + 4, more);
   }
   return true;

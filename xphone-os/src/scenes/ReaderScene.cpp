@@ -262,9 +262,9 @@ void ReaderScene::onExit() {
 const char* const* ReaderScene::softKeys() const {
   static constexpr const char* kHidden[4] = {nullptr, nullptr, nullptr, nullptr};
   // Slot 1 = the CONFIRM front button (SDK ladder order): font-size cycle.
-  static constexpr const char* kReading[4] = {"BOOKS", "SIZE", "PREV", "NEXT"};
-  static constexpr const char* kList[4] = {"BACK", "OPEN", "UP", "DOWN"};
-  static constexpr const char* kListEmpty[4] = {"BACK", nullptr, nullptr, nullptr};
+  static constexpr const char* kReading[4] = {L10N("BOOKS", "LIBRI"), L10N("SIZE", "TESTO"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kListEmpty[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, nullptr};
   switch (_state) {
     case State::Reading:
       return kReading;
@@ -337,7 +337,7 @@ void ReaderScene::workOpenBook() {
   const uint32_t t0 = millis();
   auto* e = new (std::nothrow) reader::Epub(_bookPath, reader::kReaderCacheRoot);
   if (!e) {
-    failWith("Out of memory opening book");
+    failWith(L10N("Out of memory opening book", "Memoria esaurita aprendo il libro"));
     return;
   }
   _epub.reset(e);
@@ -351,14 +351,14 @@ void ReaderScene::workOpenBook() {
       prefs.remove(kPrefsBookKey);  // don't loop into the same failure on re-entry
       prefs.end();
     }
-    failWith("Couldn't open this book");
+    failWith(L10N("Couldn't open this book", "Impossibile aprire questo libro"));
     return;
   }
 
   auto* m = new (std::nothrow) reader::TextMeasure(reader::readerFontFamily(_settings.fontId));
   if (!m) {
     _epub.reset();
-    failWith("Out of memory opening book");
+    failWith(L10N("Out of memory opening book", "Memoria esaurita aprendo il libro"));
     return;
   }
   _measure.reset(m);
@@ -371,7 +371,7 @@ void ReaderScene::workOpenBook() {
 
 void ReaderScene::workBuildSection() {
   if (!_epub || !_section) {
-    failWith("Couldn't index this chapter");
+    failWith(L10N("Couldn't index this chapter", "Impossibile indicizzare il capitolo"));
     return;
   }
   // BLOCKING: zip inflate + expat SAX + DP line break + serialize, up to
@@ -380,7 +380,7 @@ void ReaderScene::workBuildSection() {
   const uint32_t t0 = millis();
   if (!_section->createSectionFile(_settings) || !_section->loadSectionFile(_settings)) {
     _section.reset();
-    failWith("Couldn't index this chapter");
+    failWith(L10N("Couldn't index this chapter", "Impossibile indicizzare il capitolo"));
     return;
   }
   Serial.printf("[xphone-os] reader: indexed spine %d: %u pages in %lu ms, heap=%u\n", _spine,
@@ -462,7 +462,7 @@ void ReaderScene::ensureSectionOrIndex() {
   _section.reset();
   auto* s = new (std::nothrow) reader::Section(_epub, _spine, *_measure);
   if (!s) {
-    failWith("Out of memory loading chapter");
+    failWith(L10N("Out of memory loading chapter", "Memoria esaurita caricando il capitolo"));
     return;
   }
   _section.reset(s);
@@ -839,16 +839,16 @@ void ReaderScene::render(Gfx& gfx) {
 void ReaderScene::renderBody(Gfx& gfx) {
   switch (_state) {
     case State::Opening:
-      renderMessage(gfx, "Opening book...", baseName(_bookPath.c_str()));
+      renderMessage(gfx, L10N("Opening book...", "Apro il libro..."), baseName(_bookPath.c_str()));
       return;
     case State::Indexing: {
       char info[40];
-      snprintf(info, sizeof(info), "chapter %d of %d", _spine + 1, _epub ? _epub->getSpineItemsCount() : 0);
-      renderMessage(gfx, "Indexing chapter...", info);
+      snprintf(info, sizeof(info), L10N("chapter %d of %d", "capitolo %d di %d"), _spine + 1, _epub ? _epub->getSpineItemsCount() : 0);
+      renderMessage(gfx, L10N("Indexing chapter...", "Indicizzo il capitolo..."), info);
       return;
     }
     case State::Error:
-      renderMessage(gfx, "Reader", _errorMsg);
+      renderMessage(gfx, L10N("Reader", "Lettura"), _errorMsg);
       return;
     case State::BookList:
       renderBookList(gfx);
@@ -872,12 +872,12 @@ void ReaderScene::renderMessage(Gfx& gfx, const char* line1, const char* line2) 
 
 void ReaderScene::renderReading(Gfx& gfx) {
   if (!_epub || !_section || !_measure) {  // defensive: should be unreachable
-    renderMessage(gfx, "Reader", "No book open");
+    renderMessage(gfx, L10N("Reader", "Lettura"), L10N("No book open", "Nessun libro aperto"));
     return;
   }
 
   if (_section->pageCount == 0) {
-    renderMessage(gfx, nullptr, "(empty chapter)");
+    renderMessage(gfx, nullptr, L10N("(empty chapter)", "(capitolo vuoto)"));
     renderStatusLine(gfx);
     saveProgress();
     return;
@@ -903,12 +903,12 @@ void ReaderScene::renderReading(Gfx& gfx) {
         _state = State::Indexing;
         _work = Work::BuildSection;
         char info[40];
-        snprintf(info, sizeof(info), "chapter %d of %d", _spine + 1, _epub->getSpineItemsCount());
-        renderMessage(gfx, "Indexing chapter...", info);
+        snprintf(info, sizeof(info), L10N("chapter %d of %d", "capitolo %d di %d"), _spine + 1, _epub->getSpineItemsCount());
+        renderMessage(gfx, L10N("Indexing chapter...", "Indicizzo il capitolo..."), info);
         return;
       }
-      failWith("Couldn't read this chapter");
-      renderMessage(gfx, "Reader", _errorMsg);
+      failWith(L10N("Couldn't read this chapter", "Impossibile leggere il capitolo"));
+      renderMessage(gfx, L10N("Reader", "Lettura"), _errorMsg);
       return;
     }
     _pageLoadRetries = 0;
@@ -936,7 +936,7 @@ void ReaderScene::renderStatusLine(Gfx& gfx) {
   char left[8];
   char right[24];
   snprintf(left, sizeof(left), "%d%%", pct);
-  snprintf(right, sizeof(right), "ch %d/%d", _spine + 1, _epub->getSpineItemsCount());
+  snprintf(right, sizeof(right), L10N("ch %d/%d", "cap %d/%d"), _spine + 1, _epub->getSpineItemsCount());
 
   const int lineH = gfx.lineHeight(kFontSmall);
   const int y = gfx.height() - Scene::SOFTKEY_BAR_H - kStatusH + (kStatusH - lineH) / 2;
@@ -963,7 +963,7 @@ void ReaderScene::renderBookList(Gfx& gfx) {
 
   // Header.
   char line[64];
-  snprintf(line, sizeof(line), "Reader (%d)", _bookCount);
+  snprintf(line, sizeof(line), L10N("Reader (%d)", "Libri (%d)"), _bookCount);
   gfx.drawText(kFontBold, kListMarginX, 8, line);
   if (_bookCount > perPage) {
     snprintf(line, sizeof(line), "%d-%d", _scroll + 1, (_scroll + perPage < _bookCount) ? _scroll + perPage : _bookCount);
@@ -984,18 +984,18 @@ void ReaderScene::renderBookList(Gfx& gfx) {
     if (!sb.clockValid) {
       // No phone time since boot: totals still count, days can't. Say so
       // instead of drawing dash numerals and a meaningless week.
-      gfx.drawText(kFontSmall, kListMarginX, numY + capNudge, "Sync iPhone to track streaks");
+      gfx.drawText(kFontSmall, kListMarginX, numY + capNudge, L10N("Sync iPhone to track streaks", "Sincronizza iPhone per le serie"));
     } else {
       int x = kListMarginX;
       snprintf(num, sizeof(num), "%u", sb.streakDays);
       gfx.drawText(kFontBold, x, numY, num);
       x += gfx.textWidth(kFontBold, num) + 6;
-      gfx.drawText(kFontSmall, x, numY + capNudge, "DAY STREAK");
-      x += gfx.textWidth(kFontSmall, "DAY STREAK") + 24;
+      gfx.drawText(kFontSmall, x, numY + capNudge, L10N("DAY STREAK", "GIORNI FILA"));
+      x += gfx.textWidth(kFontSmall, L10N("DAY STREAK", "GIORNI FILA")) + 24;
       snprintf(num, sizeof(num), "%u", sb.todayPages);
       gfx.drawText(kFontBold, x, numY, num);
       x += gfx.textWidth(kFontBold, num) + 6;
-      gfx.drawText(kFontSmall, x, numY + capNudge, "PAGES TODAY");
+      gfx.drawText(kFontSmall, x, numY + capNudge, L10N("PAGES TODAY", "PAGINE OGGI"));
 
       // Mon..Sun of the current week; future days render as hairline stubs.
       // One type weight for all seven letters, centered under their bars:
@@ -1010,7 +1010,7 @@ void ReaderScene::renderBookList(Gfx& gfx) {
       for (int i = 0; i < 7; i++) {
         if (sb.weekPages[i] > maxPages) maxPages = sb.weekPages[i];
       }
-      static const char* kDow = "MTWTFSS";
+      static const char* kDow = L10N("MTWTFSS", "LMMGVSD");
       for (int slot = 0; slot < 7; slot++) {
         const int bx = barX0 + slot * (barW + barGap);
         const int daysBack = static_cast<int>(sb.todayWeekday) - slot;
@@ -1033,8 +1033,8 @@ void ReaderScene::renderBookList(Gfx& gfx) {
   }
 
   if (_bookCount == 0) {
-    gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), "No books found");
-    gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 + 6, "Put .epub files in /books on the SD card");
+    gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), L10N("No books found", "Nessun libro trovato"));
+    gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 + 6, L10N("Put .epub files in /books on the SD card", "Copia i file .epub in /books sulla SD"));
     return;
   }
 
@@ -1087,7 +1087,7 @@ void ReaderScene::renderTile(Gfx& gfx, const int visibleIndex) {
   const XpFont& titleFont = loaded ? kFontBold : kFontRegular;
   const char* titleSrc = loaded ? b.title : baseName(b.path);
   const char* sub = b.meta == TileMeta::Unknown     ? "..."
-                    : b.meta == TileMeta::NotOpened ? "unreadable"
+                    : b.meta == TileMeta::NotOpened ? L10N("unreadable", "illeggibile")
                                                     : b.author;
   const int textW = r.w - 2 * kTileTextPad;
   const int titleY = thumbTop + kThumbH + kTitleGap;

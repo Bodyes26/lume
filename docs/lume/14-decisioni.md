@@ -9,7 +9,7 @@ Registro delle scelte (13 agosto 2026) e delle risposte alle domande di
 |---|---|---|
 | 1 | App da tenere | tutte e sei; Workout si toglie **solo** se serve RAM (oggi non serve) |
 | 2 | Uso primario | ereader + checklist priorità + **dashboard da scrivania** (l'obiettivo grosso) |
-| 3 | Lingua | **italiano completo con language switcher** a runtime |
+| 3 | Lingua | **italiano completo a compile time**; build separate `lume-x3-it` / `lume-x3-en`, nessun selettore runtime |
 | 4 | Formati | °C, 24h — lavoro lato app: il device mostra stringhe già formattate |
 | 5 | Protocollo | base BLE/JSON/Wi-Fi **identica** all'originale; si possono rendere univoci nomi/ID per accoppiare solo la tua app col tuo firmware |
 | 6 | Hardware | **solo X3**, X4 droppato |

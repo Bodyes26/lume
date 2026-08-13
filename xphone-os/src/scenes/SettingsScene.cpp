@@ -34,7 +34,7 @@ constexpr int kHeaderH = 46;   // ~= CrossPoint headerHeight 45 (BaseTheme.h:128
 constexpr int kRowPad = 16;    // row height = lineHeight(bold) + kRowPad
 
 
-constexpr const char* kMenuLabels[5] = {"File Transfer", "SD Firmware Update", "Icon style", "Restart", "About"};
+constexpr const char* kMenuLabels[5] = {L10N("File Transfer", "Trasferimento file"), L10N("SD Firmware Update", "Aggiornamento firmware SD"), L10N("Icon style", "Stile icone"), L10N("Restart", "Riavvia"), L10N("About", "Informazioni")};
 constexpr int kMenuCount = 5;
 
 // Fixed-buffer UTF-8-safe truncation with "..." (same helper pattern as
@@ -91,9 +91,9 @@ void SettingsScene::onEnter() {
 }
 
 const char* const* SettingsScene::softKeys() const {
-  static constexpr const char* kListKeys[4] = {"BACK", "OPEN", "UP", "DOWN"};
-  static constexpr const char* kConfirmKeys[4] = {"NO", "YES", nullptr, nullptr};
-  static constexpr const char* kIconKeys[4] = {"BACK", nullptr, "PREV", "NEXT"};
+  static constexpr const char* kListKeys[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  static constexpr const char* kConfirmKeys[4] = {L10N("NO", "NO"), L10N("YES", "SÌ"), nullptr, nullptr};
+  static constexpr const char* kIconKeys[4] = {L10N("BACK", "INDIETRO"), nullptr, L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
   if (_view == View::ConfirmFlash || _view == View::ConfirmRestart) return kConfirmKeys;
   if (_view == View::IconStyle) return kIconKeys;
   return kListKeys;
@@ -179,7 +179,7 @@ void SettingsScene::doFlash() {
   // + esp_restart() — the same proven machinery as the boot-time /update.bin
   // path (SdUpdate). Returns only on failure (error X already drawn).
   sd_update::flashFromPath(_gfx->display(), path);
-  _status = "Update failed - image left untouched";
+  _status = L10N("Update failed - image left untouched", "Aggiornamento non riuscito - file intatto");
   _view = View::Picker;
   markDirty();  // repaint over the error X (panel RAM diff handles the rest)
 }
@@ -284,7 +284,7 @@ void SettingsScene::drawRow(Gfx& gfx, const int y, const int rowH, const char* l
 }
 
 void SettingsScene::renderMenu(Gfx& gfx) {
-  drawHeader(gfx, "Settings", XPHONE_VERSION);
+  drawHeader(gfx, L10N("Settings", "Impostazioni"), XPHONE_VERSION);
 
   const int rowH = gfx.lineHeight(kFontBold) + kRowPad;
   int y = kHeaderH + 8;
@@ -307,12 +307,12 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
   const uint8_t n = IconStyle::packCount();
   char right[24];
   snprintf(right, sizeof(right), "%u / %u", static_cast<unsigned>(pack + 1), static_cast<unsigned>(n));
-  drawHeader(gfx, "Icon style", right);
+  drawHeader(gfx, L10N("Icon style", "Stile icone"), right);
 
   const char* name = IconStyle::activeName();
   gfx.drawTextCentered(kFontBold, gfx.width() / 2, kHeaderH + 10, name ? name : "?");
   gfx.drawTextCentered(kFontRegular, gfx.width() / 2, kHeaderH + 10 + gfx.lineHeight(kFontBold) + 4,
-                       "PREV / NEXT to try on glass");
+                       L10N("PREV / NEXT to try on glass", "PREC / SUCC per provare sullo schermo"));
 
   // 3x2 mini launcher preview using the active pack (live — cycle applies immediately).
   constexpr int kCols = 2;
@@ -327,7 +327,7 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
   const int gridX = (gfx.width() - gridW) / 2;
   const int gridY = kHeaderH + 10 + 2 * gfx.lineHeight(kFontBold) + 20;
 
-  static constexpr const char* kLabels[6] = {"Notif", "Read", "Today", "Priorities", "Block", "Workout"};
+  static constexpr const char* kLabels[6] = {L10N("Notif", "Notif"), L10N("Read", "Leggi"), L10N("Today", "Oggi"), L10N("Priorities", "Priorità"), L10N("Block", "Focus"), L10N("Workout", "Allenamento")};
 
   // Downscale 104 -> 72 by nearest-neighbor sampling into a stack buffer of
   // one destination row, then draw. Keeps the preview cheap (no heap).
@@ -357,18 +357,18 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
 
 void SettingsScene::renderPicker(Gfx& gfx) {
   char right[24];
-  snprintf(right, sizeof(right), "%d file%s", _fileCount, _fileCount == 1 ? "" : "s");
-  drawHeader(gfx, "SD Firmware Update", _sdOk ? right : nullptr);
+  snprintf(right, sizeof(right), L10N("%d file%s", "%d file%.0s"), _fileCount, _fileCount == 1 ? "" : "s");
+  drawHeader(gfx, L10N("SD Firmware Update", "Aggiornamento firmware SD"), _sdOk ? right : nullptr);
 
   const int midY = gfx.height() / 2;
   if (!_sdOk) {
-    gfx.drawTextCentered(kFontBold, gfx.width() / 2, midY - gfx.lineHeight(kFontBold), "No SD card");
-    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, midY + 4, "Insert a card and reopen this screen");
+    gfx.drawTextCentered(kFontBold, gfx.width() / 2, midY - gfx.lineHeight(kFontBold), L10N("No SD card", "Scheda SD assente"));
+    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, midY + 4, L10N("Insert a card and reopen this screen", "Inserisci una SD e riapri questa schermata"));
     return;
   }
   if (_fileCount == 0) {
-    gfx.drawTextCentered(kFontBold, gfx.width() / 2, midY - gfx.lineHeight(kFontBold), "No .bin files found");
-    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, midY + 4, "Copy a firmware .bin to the SD root");
+    gfx.drawTextCentered(kFontBold, gfx.width() / 2, midY - gfx.lineHeight(kFontBold), L10N("No .bin files found", "Nessun file .bin trovato"));
+    gfx.drawTextCentered(kFontRegular, gfx.width() / 2, midY + 4, L10N("Copy a firmware .bin to the SD root", "Copia il firmware .bin nella radice SD"));
     return;
   }
 
@@ -393,14 +393,14 @@ void SettingsScene::renderPicker(Gfx& gfx) {
 }
 
 void SettingsScene::renderConfirmFlash(Gfx& gfx) {
-  drawHeader(gfx, "SD Firmware Update", nullptr);
+  drawHeader(gfx, L10N("SD Firmware Update", "Aggiornamento firmware SD"), nullptr);
   const BinFile& f = _files[_pickSel];
 
   char line[96];
   char clipped[80];
-  truncateToWidth(gfx, kFontBold, f.name, gfx.width() - 2 * kMarginX - gfx.textWidth(kFontBold, "Flash ?"), clipped,
+  truncateToWidth(gfx, kFontBold, f.name, gfx.width() - 2 * kMarginX - gfx.textWidth(kFontBold, L10N("Flash ?", "Installare?")), clipped,
                   sizeof(clipped));
-  snprintf(line, sizeof(line), "Flash %s?", clipped);
+  snprintf(line, sizeof(line), L10N("Flash %s?", "Installare %s?"), clipped);
 
   int y = gfx.height() / 2 - 2 * gfx.lineHeight(kFontBold);
   gfx.drawTextCentered(kFontBold, gfx.width() / 2, y, line);
@@ -410,12 +410,12 @@ void SettingsScene::renderConfirmFlash(Gfx& gfx) {
   formatSize(f.size, size, sizeof(size));
   gfx.drawTextCentered(kFontRegular, gfx.width() / 2, y, size);
   y += gfx.lineHeight(kFontRegular) + 14;
-  gfx.drawTextCentered(kFontRegular, gfx.width() / 2, y, "Flashes the inactive slot, then restarts.");
+  gfx.drawTextCentered(kFontRegular, gfx.width() / 2, y, L10N("Flashes the inactive slot, then restarts.", "Installa nello slot inattivo, poi riavvia."));
 }
 
 void SettingsScene::renderConfirmRestart(Gfx& gfx) {
-  drawHeader(gfx, "Restart", nullptr);
-  gfx.drawTextCentered(kFontBold, gfx.width() / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), "Restart device?");
+  drawHeader(gfx, L10N("Restart", "Riavvia"), nullptr);
+  gfx.drawTextCentered(kFontBold, gfx.width() / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), L10N("Restart device?", "Riavviare il dispositivo?"));
 }
 
 void SettingsScene::render(Gfx& gfx) {

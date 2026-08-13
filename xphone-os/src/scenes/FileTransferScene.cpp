@@ -57,11 +57,11 @@ void FileTransferScene::onExit() {
 }
 
 const char* const* FileTransferScene::softKeys() const {
-  static constexpr const char* kIdleKeys[4] = {"BACK", "SYNC", nullptr, nullptr};
-  static constexpr const char* kIdleNoCredsKeys[4] = {"BACK", nullptr, nullptr, nullptr};
-  static constexpr const char* kConnectingKeys[4] = {"CANCEL", nullptr, nullptr, nullptr};
-  static constexpr const char* kRunningKeys[4] = {"EXIT", nullptr, nullptr, nullptr};
-  static constexpr const char* kFailedKeys[4] = {"BACK", "RETRY", nullptr, nullptr};
+  static constexpr const char* kIdleKeys[4] = {L10N("BACK", "INDIETRO"), L10N("SYNC", "SINC"), nullptr, nullptr};
+  static constexpr const char* kIdleNoCredsKeys[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, nullptr};
+  static constexpr const char* kConnectingKeys[4] = {L10N("CANCEL", "ANNULLA"), nullptr, nullptr, nullptr};
+  static constexpr const char* kRunningKeys[4] = {L10N("EXIT", "ESCI"), nullptr, nullptr, nullptr};
+  static constexpr const char* kFailedKeys[4] = {L10N("BACK", "INDIETRO"), L10N("RETRY", "RIPROVA"), nullptr, nullptr};
   switch (_state) {
     case State::Idle:       return _ssid[0] ? kIdleKeys : kIdleNoCredsKeys;
     case State::Connecting: return kConnectingKeys;
@@ -77,7 +77,7 @@ void FileTransferScene::autoStart() {
     startSta();
   } else {
     // No creds: tell the app so it can prompt for Wi-Fi instead of hanging.
-    _failReason = "No Wi-Fi saved";
+    _failReason = L10N("No Wi-Fi saved", "Nessuna rete Wi-Fi salvata");
     _state = State::Failed;
     COMPANION_BLE.sendTransferStatus("needs-wifi");
     markDirty();
@@ -149,7 +149,7 @@ void FileTransferScene::pollConnecting() {
   if (now - _connectStartMs > kStaTimeoutMs) {
     Serial.printf("[xphone-os] transfer: join timed out (status=%d)\n", status);
     WiFi.disconnect(true);
-    _failReason = "Could not join Wi-Fi";
+    _failReason = L10N("Could not join Wi-Fi", "Connessione Wi-Fi non riuscita");
     _state = State::Failed;
     // BLE died in startSta(), so a "failed" notify here is a silent no-op
     // (CompanionBleService guard) — the phone would wait forever for a
@@ -166,7 +166,7 @@ void FileTransferScene::startServerOrFail() {
     Serial.printf("[xphone-os] transfer: mDNS http://%s.local/\n", kHostname);
   }
   if (!_server.begin()) {
-    _failReason = "Server failed to start";
+    _failReason = L10N("Server failed to start", "Avvio del server non riuscito");
     _state = State::Failed;
     _failedAtMs = millis();  // BLE is down here too — same stranding as the join timeout
     markDirty();
@@ -258,7 +258,7 @@ void FileTransferScene::handleInput(Input& in) {
 }
 
 void FileTransferScene::render(Gfx& gfx) {
-  gfx.drawText(kFontBold, kMarginX, 8, "File Transfer");
+  gfx.drawText(kFontBold, kMarginX, 8, L10N("File Transfer", "Trasferimento file"));
   gfx.fillRect(0, kHeaderH - 2, gfx.width(), 2, true);
 
   const int w = gfx.width();
@@ -268,36 +268,36 @@ void FileTransferScene::render(Gfx& gfx) {
 
   switch (_state) {
     case State::Idle:
-      gfx.drawText(kFontRegular, kMarginX, y, "Move books with the Lume app");
+      gfx.drawText(kFontRegular, kMarginX, y, L10N("Move books with the Lume app", "Trasferisci i libri con l'app Lume"));
       y += lineReg + 4;
-      gfx.drawText(kFontRegular, kMarginX, y, "over Wi-Fi.");
+      gfx.drawText(kFontRegular, kMarginX, y, L10N("over Wi-Fi.", "tramite Wi-Fi."));
       y += lineReg + 24;
       if (_ssid[0]) {
-        gfx.drawText(kFontBold, kMarginX, y, "Saved network");
+        gfx.drawText(kFontBold, kMarginX, y, L10N("Saved network", "Rete salvata"));
         y += lineBold + 4;
         gfx.drawText(kFontRegular, kMarginX, y, _ssid);
         y += lineReg + 20;
-        gfx.drawText(kFontRegular, kMarginX, y, "Press SYNC to join it, or start");
+        gfx.drawText(kFontRegular, kMarginX, y, L10N("Press SYNC to join it, or start", "Premi SINC per collegarti, oppure avvia"));
         y += lineReg + 4;
-        gfx.drawText(kFontRegular, kMarginX, y, "a sync from the Lume app.");
+        gfx.drawText(kFontRegular, kMarginX, y, L10N("a sync from the Lume app.", "la sincronizzazione dall'app Lume."));
       } else {
-        gfx.drawText(kFontBold, kMarginX, y, "No Wi-Fi saved yet");
+        gfx.drawText(kFontBold, kMarginX, y, L10N("No Wi-Fi saved yet", "Nessuna rete Wi-Fi salvata"));
         y += lineBold + 4;
-        gfx.drawText(kFontRegular, kMarginX, y, "Add your network in the Lume");
+        gfx.drawText(kFontRegular, kMarginX, y, L10N("Add your network in the Lume", "Aggiungi la rete nell'app Lume"));
         y += lineReg + 4;
-        gfx.drawText(kFontRegular, kMarginX, y, "app (Read tab > Sync).");
+        gfx.drawText(kFontRegular, kMarginX, y, L10N("app (Read tab > Sync).", "(Leggi > Sincronizza)."));
       }
       break;
 
     case State::Connecting: {
       char line[96];
-      snprintf(line, sizeof(line), "Joining %s...", _ssid);
+      snprintf(line, sizeof(line), L10N("Joining %s...", "Connessione a %s..."), _ssid);
       gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - lineBold, line);
       break;
     }
 
     case State::Running: {
-      gfx.drawText(kFontBold, kMarginX, y, "Ready to sync");
+      gfx.drawText(kFontBold, kMarginX, y, L10N("Ready to sync", "Pronto a sincronizzare"));
       y += lineBold + 4;
       gfx.drawText(kFontRegular, kMarginX, y, _ssid);
       y += lineReg + 20;
@@ -306,12 +306,12 @@ void FileTransferScene::render(Gfx& gfx) {
       snprintf(url, sizeof(url), "http://%s/", _ip);
       gfx.drawTextCentered(kFontBold, w / 2, y, url);
       y += lineBold + 6;
-      gfx.drawTextCentered(kFontRegular, w / 2, y, "Open Lume > Read > Sync");
+      gfx.drawTextCentered(kFontRegular, w / 2, y, L10N("Open Lume > Read > Sync", "Apri Lume > Leggi > Sincronizza"));
       y += lineReg + 24;
 
       char stats[64];
       const uint32_t kb = (_server.bytesUploaded() + _server.bytesDownloaded()) / 1024;
-      snprintf(stats, sizeof(stats), "%u request%s   %lu KB moved", static_cast<unsigned>(_server.requestCount()),
+      snprintf(stats, sizeof(stats), L10N("%u request%s   %lu KB moved", "%u richieste%.0s   %lu KB trasferiti"), static_cast<unsigned>(_server.requestCount()),
                _server.requestCount() == 1 ? "" : "s", static_cast<unsigned long>(kb));
       gfx.drawTextCentered(kFontRegular, w / 2, y, stats);
       break;
@@ -320,7 +320,7 @@ void FileTransferScene::render(Gfx& gfx) {
     case State::Failed:
       gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - 2 * lineBold, _failReason);
       gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 - lineBold + 8,
-                           _ssid[0] ? "RETRY to try again" : "Add Wi-Fi in the Lume app");
+                           _ssid[0] ? L10N("RETRY to try again", "RIPROVA per tentare ancora") : L10N("Add Wi-Fi in the Lume app", "Aggiungi il Wi-Fi nell'app Lume"));
       break;
   }
 }

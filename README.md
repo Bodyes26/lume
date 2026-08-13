@@ -112,11 +112,13 @@ and 2.5 MB of its 6.5 MB app partition.
 
 ## Install
 
-No public Lume release has been published yet. For development, build
-`xphone-os/.pio/build/lume-x3/firmware.bin`, or rename that image to
-`update.bin` and copy it to the root of the microSD card. Insert the card and
-hold **Left + Power**. The updater validates the image before switching the
-inactive OTA slot.
+No public Lume release has been published yet. Firmware language is selected at
+compile time: Italian is `lume-x3-it` (default), English is `lume-x3-en`.
+For development, copy `xphone-os/update_it.bin` or `update_en.bin` to the SD
+root and select it in **Settings → SD Firmware Update**. For the boot recovery
+shortcut, rename the chosen image to `update.bin`, insert the card, then hold
+**Left + Power**. The updater validates it before switching the inactive OTA
+slot.
 
 The X3 fingerprint guard runs before display initialization. If the image is
 accidentally installed on non-X3 hardware, Lume leaves the panel untouched and
@@ -131,8 +133,8 @@ from the rest of the workstation:
 python3.11 -m venv .venv
 .venv/bin/python -m pip install platformio==6.1.19
 cd xphone-os
-../.venv/bin/pio run -e lume-x3
-../.venv/bin/pio run -e lume-x3 -t upload
+../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
+../.venv/bin/pio run -e lume-x3-it -t upload
 ../.venv/bin/pio device monitor --baud 115200
 ```
 

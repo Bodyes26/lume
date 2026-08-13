@@ -73,8 +73,8 @@ Eseguire dalla root del repository salvo diversa indicazione:
 
 ```sh
 cd xphone-os
-../.venv/bin/pio run -e lume-x3
-../.venv/bin/pio run -e lume-x3 -t upload
+../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
+../.venv/bin/pio run -e lume-x3-it -t upload
 ../.venv/bin/pio device monitor --baud 115200
 ```
 
@@ -94,3 +94,7 @@ su hardware con `/Applications/Xcode-beta.app`.
 Prima di flashare, verificare che il cavo pogo sia quello dati a 4 pin. Non usare
 comandi distruttivi sulla SD e non inizializzare il display finché il guard X3 non ha
 confermato l'hardware.
+
+La localizzazione firmware è a compile time: italiano `lume-x3-it` (default),
+inglese `lume-x3-en`. Le build e l'isolamento delle stringhe nei due binari sono
+verificati; la revisione visiva italiana sul vero X3 è ancora pendente.

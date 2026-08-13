@@ -28,26 +28,26 @@ void AboutScene::render(Gfx& gfx) {
   const int x = 24;
   int y = 16;
 
-  gfx.drawText(kFontBold, x, y, "About Lume");
+  gfx.drawText(kFontBold, x, y, L10N("About Lume", "Informazioni su Lume"));
   y += gfx.lineHeight(kFontBold) + 10;
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
 
-  snprintf(line, sizeof(line), "version: %s (built %s %s)", XPHONE_VERSION, __DATE__, __TIME__);
+  snprintf(line, sizeof(line), L10N("version: %s (built %s %s)", "versione: %s (creata %s %s)"), XPHONE_VERSION, __DATE__, __TIME__);
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "panel: %s  %dx%d", BoardConfig::ACTIVE.name, gfx.width(), gfx.height());
+  snprintf(line, sizeof(line), L10N("panel: %s  %dx%d", "pannello: %s  %dx%d"), BoardConfig::ACTIVE.name, gfx.width(), gfx.height());
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "boot to first paint: %lu ms", gBootTotalMs);
+  snprintf(line, sizeof(line), L10N("boot to first paint: %lu ms", "avvio al primo disegno: %lu ms"), gBootTotalMs);
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
   // M4.2 wake diagnostic: reset reason + last-scene restore outcome, captured
   // once in boot(). Tells us whether the power-button wake is DEEPSLEEP (RTC
   // would survive) or POWERON (needs NVS), and whether a scene was restored.
-  snprintf(line, sizeof(line), "wake: %s  restore: %s", gWakeResetReason, gWakeRestoreScene);
+  snprintf(line, sizeof(line), L10N("wake: %s  restore: %s", "risveglio: %s  ripristino: %s"), gWakeResetReason, gWakeRestoreScene);
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
@@ -55,30 +55,33 @@ void AboutScene::render(Gfx& gfx) {
   // (millis() starts ~0 at boot, so the stamps ARE the delays). This readout
   // is the experiment — no serial cable needed.
   if (CLOCK_STORE.firstSyncMs != 0) {
-    snprintf(line, sizeof(line), "time.sync: ble %lu ms  date %lu ms  %02u:%02u",
+    snprintf(line, sizeof(line),
+             L10N("time.sync: ble %lu ms  date %lu ms  %02u:%02u",
+                  "time.sync: ble %lu ms  data %lu ms  %02u:%02u"),
              static_cast<unsigned long>(CLOCK_STORE.firstConnectMs),
              static_cast<unsigned long>(CLOCK_STORE.firstSyncMs),
              static_cast<unsigned>(CLOCK_STORE.minutesIntoDay / 60),
              static_cast<unsigned>(CLOCK_STORE.minutesIntoDay % 60));
   } else if (CLOCK_STORE.firstConnectMs != 0) {
-    snprintf(line, sizeof(line), "time.sync: ble %lu ms  date pending",
+    snprintf(line, sizeof(line), L10N("time.sync: ble %lu ms  date pending",
+                                     "time.sync: ble %lu ms  data in attesa"),
              static_cast<unsigned long>(CLOCK_STORE.firstConnectMs));
   } else {
-    snprintf(line, sizeof(line), "time.sync: no connect since boot");
+    snprintf(line, sizeof(line), L10N("time.sync: no connect since boot", "time.sync: nessuna connessione dall'avvio"));
   }
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "heap free: %u B", static_cast<unsigned>(ESP.getFreeHeap()));
+  snprintf(line, sizeof(line), L10N("heap free: %u B", "heap libera: %u B"), static_cast<unsigned>(ESP.getFreeHeap()));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "heap min free: %u B",
+  snprintf(line, sizeof(line), L10N("heap min free: %u B", "heap libera minima: %u B"),
            static_cast<unsigned>(esp_get_minimum_free_heap_size()));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "heap largest block: %u B",
+  snprintf(line, sizeof(line), L10N("heap largest block: %u B", "blocco heap maggiore: %u B"),
            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 10;
@@ -90,15 +93,15 @@ void AboutScene::render(Gfx& gfx) {
   // the readout. ------------------------------------------------------------
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
 
-  snprintf(line, sizeof(line), "last draw: %lu ms", gRefreshStats.drawMs);
+  snprintf(line, sizeof(line), L10N("last draw: %lu ms", "ultimo disegno: %lu ms"), gRefreshStats.drawMs);
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "last refresh: %lu ms (%s)", gRefreshStats.refreshMs, gRefreshStats.tier);
+  snprintf(line, sizeof(line), L10N("last refresh: %lu ms (%s)", "ultimo refresh: %lu ms (%s)"), gRefreshStats.refreshMs, gRefreshStats.tier);
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "partials since scrub: %u  (HALF every %u)",
+  snprintf(line, sizeof(line), L10N("partials since scrub: %u  (HALF every %u)", "parziali dal reset: %u  (HALF ogni %u)"),
            static_cast<unsigned>(gRefreshStats.sinceScrub), static_cast<unsigned>(kScrubAfterRefreshes));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 10;
@@ -108,7 +111,7 @@ void AboutScene::render(Gfx& gfx) {
   // adv mode + conn interval = what the radio is actually doing). -----------
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
 
-  snprintf(line, sizeof(line), "cpu: %lu MHz  uptime: %lu min",
+  snprintf(line, sizeof(line), L10N("cpu: %lu MHz  uptime: %lu min", "cpu: %lu MHz  attivo: %lu min"),
            static_cast<unsigned long>(getCpuFrequencyMhz()), static_cast<unsigned long>(millis() / 60000UL));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
@@ -121,12 +124,12 @@ void AboutScene::render(Gfx& gfx) {
     const bool hasAvg = BatteryGauge::readAvgCurrentMa(avgMa);
     if (batt.supported && batt.percentageKnown && batt.millivoltsKnown) {
       if (hasAvg) {
-        snprintf(line, sizeof(line), "battery: %u%%  %u mV  avg %d mA", batt.percentage, batt.millivolts, avgMa);
+        snprintf(line, sizeof(line), L10N("battery: %u%%  %u mV  avg %d mA", "batteria: %u%%  %u mV  media %d mA"), batt.percentage, batt.millivolts, avgMa);
       } else {
-        snprintf(line, sizeof(line), "battery: %u%%  %u mV", batt.percentage, batt.millivolts);
+        snprintf(line, sizeof(line), L10N("battery: %u%%  %u mV", "batteria: %u%%  %u mV"), batt.percentage, batt.millivolts);
       }
     } else {
-      snprintf(line, sizeof(line), "battery: unavailable");
+      snprintf(line, sizeof(line), L10N("battery: unavailable", "batteria: non disponibile"));
     }
   }
   gfx.drawText(kFontRegular, x, y, line);
@@ -143,20 +146,20 @@ void AboutScene::render(Gfx& gfx) {
     if (BatteryGauge::readWord(BatteryGauge::kCmdRemainingCapacity, remainMah) &&
         BatteryGauge::readWord(BatteryGauge::kCmdFullChargeCapacity, fccMah) &&
         BatteryGauge::readWord(BatteryGauge::kCmdDesignCapacity, designMah)) {
-      snprintf(line, sizeof(line), "gauge: %u/%u mAh  design %u mAh", remainMah, fccMah, designMah);
+      snprintf(line, sizeof(line), L10N("gauge: %u/%u mAh  design %u mAh", "gauge: %u/%u mAh  nominale %u mAh"), remainMah, fccMah, designMah);
       gfx.drawText(kFontRegular, x, y, line);
       y += gfx.lineHeight(kFontRegular) + 4;
     }
   }
 
   if (!COMPANION_BLE.isStarted()) {
-    snprintf(line, sizeof(line), "adv: off");
+    snprintf(line, sizeof(line), L10N("adv: off", "adv: spento"));
   } else if (COMPANION_BLE.isConnected()) {
-    snprintf(line, sizeof(line), "adv: stopped (connected)");
+    snprintf(line, sizeof(line), L10N("adv: stopped (connected)", "adv: fermo (connesso)"));
   } else if (COMPANION_BLE.getAdvMode() == CompanionBleService::AdvMode::Fast) {
-    snprintf(line, sizeof(line), "adv: fast (30-60 ms window)");
+    snprintf(line, sizeof(line), L10N("adv: fast (30-60 ms window)", "adv: veloce (finestra 30-60 ms)"));
   } else {
-    snprintf(line, sizeof(line), "adv: slow (400-500 ms)");
+    snprintf(line, sizeof(line), L10N("adv: slow (400-500 ms)", "adv: lento (400-500 ms)"));
   }
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
@@ -165,10 +168,13 @@ void AboutScene::render(Gfx& gfx) {
     uint16_t itvl125 = 0, latency = 0, timeout10ms = 0;
     if (COMPANION_BLE.getConnParams(itvl125, latency, timeout10ms)) {
       const unsigned itvlUs = static_cast<unsigned>(itvl125) * 1250u;  // 1.25 ms units
-      snprintf(line, sizeof(line), "conn: %u.%02u ms  lat=%u  timeout=%u ms", itvlUs / 1000u,
-               (itvlUs % 1000u) / 10u, latency, static_cast<unsigned>(timeout10ms) * 10u);
+      snprintf(line, sizeof(line),
+               L10N("conn: %u.%02u ms  lat=%u  timeout=%u ms",
+                    "conn: %u.%02u ms  lat=%u  timeout=%u ms"),
+               itvlUs / 1000u, (itvlUs % 1000u) / 10u, latency,
+               static_cast<unsigned>(timeout10ms) * 10u);
     } else {
-      snprintf(line, sizeof(line), "conn: none");
+      snprintf(line, sizeof(line), L10N("conn: none", "conn: nessuna"));
     }
   }
   gfx.drawText(kFontRegular, x, y, line);
@@ -179,20 +185,20 @@ void AboutScene::render(Gfx& gfx) {
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
 
   if (!COMPANION_BLE.isStarted()) {
-    snprintf(line, sizeof(line), "ble: off");
+    snprintf(line, sizeof(line), L10N("ble: off", "ble: spento"));
   } else if (COMPANION_BLE.isConnected()) {
-    snprintf(line, sizeof(line), "ble: connected");
+    snprintf(line, sizeof(line), L10N("ble: connected", "ble: connesso"));
   } else {
-    snprintf(line, sizeof(line), "ble: advertising as %s", CompanionProtocol::deviceName());
+    snprintf(line, sizeof(line), L10N("ble: advertising as %s", "ble: visibile come %s"), CompanionProtocol::deviceName());
   }
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
   char peer[18];
   if (COMPANION_BLE.getPeerAddress(peer, sizeof(peer))) {
-    snprintf(line, sizeof(line), "peer: %s%s", peer, COMPANION_BLE.isConnected() ? "" : " (last)");
+    snprintf(line, sizeof(line), L10N("peer: %s%s", "dispositivo: %s%s"), peer, COMPANION_BLE.isConnected() ? "" : L10N(" (last)", " (ultimo)"));
   } else {
-    snprintf(line, sizeof(line), "peer: none since boot");
+    snprintf(line, sizeof(line), L10N("peer: none since boot", "dispositivo: nessuno dall'avvio"));
   }
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
@@ -204,7 +210,7 @@ void AboutScene::render(Gfx& gfx) {
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
-  snprintf(line, sizeof(line), "notifications stored: %u",
+  snprintf(line, sizeof(line), L10N("notifications stored: %u", "notifiche salvate: %u"),
            static_cast<unsigned>(NOTIFICATION_STORE.count()));
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
@@ -215,12 +221,16 @@ void AboutScene::render(Gfx& gfx) {
     const UBaseType_t loopHwm = uxTaskGetStackHighWaterMark(nullptr);
     const TaskHandle_t bleTask = COMPANION_ANCS.getHostTaskHandle();
     if (bleTask) {
-      snprintf(line, sizeof(line), "stack HWM: loop %u B  ble %u B  ancs q peak %u/6 drops %lu",
+      snprintf(line, sizeof(line),
+               L10N("stack HWM: loop %u B  ble %u B  ancs q peak %u/6 drops %lu",
+                    "stack HWM: loop %u B  ble %u B  coda ancs max %u/6 persi %lu"),
                static_cast<unsigned>(loopHwm), static_cast<unsigned>(uxTaskGetStackHighWaterMark(bleTask)),
                COMPANION_ANCS.getQueueHighWater(),
                static_cast<unsigned long>(COMPANION_ANCS.getQueueDropCount()));
     } else {
-      snprintf(line, sizeof(line), "stack HWM: loop %u B  ble n/a  ancs q peak %u/6 drops %lu",
+      snprintf(line, sizeof(line),
+               L10N("stack HWM: loop %u B  ble n/a  ancs q peak %u/6 drops %lu",
+                    "stack HWM: loop %u B  ble n/d  coda ancs max %u/6 persi %lu"),
                static_cast<unsigned>(loopHwm), COMPANION_ANCS.getQueueHighWater(),
                static_cast<unsigned long>(COMPANION_ANCS.getQueueDropCount()));
     }
@@ -229,10 +239,10 @@ void AboutScene::render(Gfx& gfx) {
   y += gfx.lineHeight(kFontRegular) + 4;
 
 #if XP_AUTO_SLEEP_MS > 0
-  snprintf(line, sizeof(line), "Press power to sleep (auto %lu min), hold 3s to restart",
+  snprintf(line, sizeof(line), L10N("Press power to sleep (auto %lu min), hold 3s to restart", "Premi accensione per dormire (auto %lu min), tieni 3s per riavviare"),
            static_cast<unsigned long>(XP_AUTO_SLEEP_MS / 60000UL));
 #else
-  snprintf(line, sizeof(line), "Press power to sleep, hold 3s to restart");
+  snprintf(line, sizeof(line), L10N("Press power to sleep, hold 3s to restart", "Premi accensione per dormire, tieni 3s per riavviare"));
 #endif
   gfx.drawText(kFontRegular, x, y, line);
   // M2.1: footer hint replaced by the SceneManager soft-key bar (default BACK tab).

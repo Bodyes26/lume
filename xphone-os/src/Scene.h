@@ -12,6 +12,7 @@
 
 #include "Gfx.h"
 #include "Input.h"
+#include "LumeLocale.h"
 
 class Scene {
  public:

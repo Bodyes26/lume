@@ -6,7 +6,7 @@
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
-**Fase:** firmware v0.1 accettato; Priorities e Today verificati end-to-end su iPhone e X3.
+**Fase:** localizzazione firmware IT/EN compilata e isolata; verifica visiva italiana su X3 pendente.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -18,9 +18,10 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Documentazione persistente | **VERIFICATA** | 14 capitoli + START/HANDOFF dentro `docs/lume/` |
 | Toolchain locale | **VERIFICATA** | Python 3.11, `.venv`, PlatformIO Core 6.1.19 |
 | Build upstream di riferimento | **VERIFICATA** | `xteink` prima delle modifiche: SUCCESS; flash 2.532.155 B, RAM 145.004 B |
-| Build Lume X3-only | **VERIFICATA** | ultimo build: SUCCESS; flash 2.527.197 B, RAM 144.996 B |
+| Build Lume X3 localizzate | **VERIFICATA** | IT: RAM 144.996 B, flash 2.529.849 B, bin 2.542.384 B; EN: RAM 144.996 B, flash 2.529.125 B, bin 2.541.664 B |
 | Identità a compile time | **VERIFICATA** | stringhe, UUID GATT Lume, identità BLE random-static, asset/env/release compilano |
-| Boot e resa sul vetro | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo |
+| Localizzazione firmware | **BUILD VERIFICATA; VETRO PENDENTE** | `lume-x3-it/en`; scene, chrome, diagnostica BLE/ANCS e pairing sono localizzati; ogni binario contiene solo la propria lingua; X3 non collegato durante l'ultima sessione |
+| Boot e resa sul vetro pre-i18n | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo prima della localizzazione |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
 
@@ -58,8 +59,9 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 
 ### Clean cutover X3
 
-* Un solo env PlatformIO: `lume-x3`, default, con `FREEINK_DEVICE_X3=1` e senza
-  `FREEINK_DEVICE_X4`. Il compilatore elimina SSD1677 e i rami/artwork X4.
+* Un solo target hardware X3, con due env di locale: `lume-x3-it` (default) e
+  `lume-x3-en`. Entrambi definiscono `FREEINK_DEVICE_X3=1` e non
+  `FREEINK_DEVICE_X4`; il compilatore elimina SSD1677 e i rami/artwork X4.
 * `boot()` chiama `detectXteinkIsX3()` prima di SPI/display. Se il fingerprint non
   trova almeno 2 fra BQ27220/DS3231/QMI8658 in entrambe le passate, stampa FATAL e
   resta fermo: nessun comando viene inviato al pannello sbagliato.
@@ -72,9 +74,10 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 
 ### Release e README
 
-* `.github/workflows/firmware-release.yml` compila solo `lume-x3` e produce:
-  `lume-x3.bin`, `lume-x3-<version>.bin`, `update.bin`, `lume-x3.zip`, checksum e
-  `latest.json` con la sola chiave `x3`.
+* `.github/workflows/firmware-release.yml` compila `lume-x3-it` e
+  `lume-x3-en`; produce `update_it.bin`, `update_en.bin`, copie
+  unversioned/versionate, due zip con `update.bin`, checksum e `latest.json`
+  con `assets.x3.defaultLocale` e `assets.x3.locales.it/en`.
 * `README.md` e `xphone-os/README.md` distinguono Lume dall'upstream e riportano
   i comandi reali; il README principale documenta anche il vertical slice iOS.
 
@@ -120,37 +123,38 @@ Nessun blocco esterno residuo per build/installazione: Xcode beta è in
 `/Applications/Xcode-beta.app`, l'account Apple è registrato, il provisioning
 automatico usa il team `XTU68E98BM` e l'app firmata è installata sul telefono.
 
-## Evidenza di build
+## Evidenza di build localizzata
 
 Comando eseguito dalla root modulo:
 
 ```sh
 cd xphone-os
-../.venv/bin/pio run -e lume-x3
+../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
 ```
 
 Risultato osservato:
 
-```text
-SUCCESS
-RAM:   144996 / 327680 bytes (44.2%)
-Flash: 2527197 / 6553600 bytes (38.6%)
-firmware.bin: 2539728 bytes
-SHA-256: 0aa49a6e4e128cdae1b73ab69f3b4c0a9297301576a952760e05ef07c255ba7d
-```
+| Env | RAM PlatformIO | Flash PlatformIO | `firmware.bin` | SHA-256 |
+|---|---:|---:|---:|---|
+| `lume-x3-it` | 144.996 B | 2.529.849 B | 2.542.384 B | `1f13ec884852424b89694fba276bf8256ef23068a0725fa6d2c525d3f9fef153` |
+| `lume-x3-en` | 144.996 B | 2.529.125 B | 2.541.664 B | `fafa18275a9b3e0a707f36ca6d4e4bc2135ac3f4bd6cd56013a876d181637c28` |
 
-Confronto col build upstream eseguito immediatamente prima delle modifiche:
+Entrambe: `SUCCESS`, RAM 44,2%, flash 38,6%. `esptool image-info` riconosce
+ESP32-C3, flash DIO 16 MB e checksum/validation hash validi.
 
-| | Upstream dual X3/X4 | Lume X3-only | Delta |
+Isolamento verificato cercando byte nei binari: IT contiene
+`Impostazioni`, `Nessuna notifica`, `Priorità di oggi`, `GIÙ`, `SÌ` e non le
+forme inglesi campione; EN contiene le forme inglesi e non quelle italiane.
+
+Confronto col build upstream dual X3/X4 eseguito prima del fork:
+
+| | Upstream dual X3/X4 | Lume IT | Lume EN |
 |---|---:|---:|---:|
-| RAM PlatformIO | 145.004 B | 144.988 B | −16 B |
-| Flash PlatformIO | 2.532.155 B | 2.526.151 B | −6.004 B |
-| Total image size report | 2.544.539 B | 2.538.535 B | −6.004 B |
+| RAM PlatformIO | 145.004 B | 144.996 B | 144.996 B |
+| Flash PlatformIO | 2.532.155 B | 2.529.849 B | 2.529.125 B |
 
-Il delta conferma l'analisi: eliminare X4 semplifica e riduce flash, non libera RAM
-significativa perché il framebuffer X3 è già quello più grande. Warning di build
-rimasti sono ereditati (SdFat/FS macro, JPEGDEC/PNGdec macro, `NetworkClient::flush`
-deprecato), non introdotti dal cutover.
+I warning rimasti sono ereditati (SdFat/FS macro, JPEGDEC/PNGdec macro,
+`NetworkClient::flush` deprecato), non introdotti dalla localizzazione.
 
 ## Prova hardware v0.1 — completata
 
@@ -163,8 +167,9 @@ MAC d4:05:92:91:72:3c
 flash auto-rilevata: 16 MB
 ```
 
-Ultimo upload eseguito con `pio run -e lume-x3 -t upload`: immagine da
-2.539.728 B, **hash verificato da esptool**, hard reset completato e `SUCCESS`.
+Ultimo upload hardware pre-localizzazione, eseguito con l'env allora chiamato
+`lume-x3`, ha scritto un'immagine da 2.539.728 B: **hash verificato da
+esptool**, hard reset completato e `SUCCESS`.
 Il monitor, aperto dopo il boot, ha osservato loop stabile, refresh FAST/PARTIAL,
 BLE connesso e una notifica WhatsApp completa via ANCS. Maurizio ha confermato
 visivamente che il lockup superiore mostra `lume` al posto di `Flowe`.
@@ -223,8 +228,8 @@ Verifiche automatiche: `swift test` con **7/7 PASS** (4 protocollo esistenti +
 
 ## Prossime azioni
 
-1. Implementare l'italiano completo con selettore a caldo, come definito nella
-   milestone v0.3.
+1. Collegare l'X3, flashare `lume-x3-it` e verificare sul vetro tutte le scene,
+   soft-key, righe lunghe e glifi accentati.
 2. Verificare il recovery del timeout GATT scollegando intenzionalmente il
    device durante una write.
 3. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
@@ -233,8 +238,9 @@ Verifiche automatiche: `swift test` con **7/7 PASS** (4 protocollo esistenti +
 
 ## Decisioni da non riaprire senza nuova evidenza
 
-Nome Lume; X3-only; tutte e sei le app; italiano con language switcher; °C/24h; reader
-Wi-Fi dall'app; payload JSON compatibile ma identità/UUID GATT Lume isolati; HTTP senza
-token finché il transfer è effimero; rollback OTA rinviato; RTC DS3231 previsto;
-dashboard da scrivania obiettivo principale.
+Nome Lume; X3-only; tutte e sei le app; italiano/inglese in immagini separate a
+compile time; °C/24h; reader Wi-Fi dall'app; payload JSON compatibile ma
+identità/UUID GATT Lume isolati; HTTP senza token finché il transfer è effimero;
+rollback OTA rinviato; RTC DS3231 previsto; dashboard da scrivania obiettivo
+principale.
 Dettagli e fonti: [14-decisioni.md](14-decisioni.md).

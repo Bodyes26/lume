@@ -1,4 +1,5 @@
 #include "AppScenes.h"
+#include "../LumeLocale.h"
 
 #include "AboutScene.h"
 #include "BlockScene.h"
@@ -18,7 +19,7 @@ SceneId gCurrentSceneId = SceneId::Launcher;
 
 // M4.2 wake diagnostics — set once by main.cpp boot(); defaults hold until then.
 const char* gWakeResetReason = "?";
-const char* gWakeRestoreScene = "none";
+const char* gWakeRestoreScene = L10N("none", "nessuna");
 
 namespace {
 // All scenes are static instances — fixed allocation, zero heap churn.
@@ -125,17 +126,17 @@ void showSceneById(SceneId id) {
 
 const char* sceneName(SceneId id) {
   switch (id) {
-    case SceneId::Notifications: return "Notifications";
-    case SceneId::Settings:      return "Settings";
-    case SceneId::Block:         return "Block";
-    case SceneId::Priorities:    return "Priorities";
-    case SceneId::Today:         return "Today";
-    case SceneId::About:         return "About";
-    case SceneId::Reader:        return "Reader";
-    case SceneId::Workout:       return "Workout";
-    case SceneId::FileTransfer:  return "Transfer";
-    case SceneId::Launcher:      return "Launcher";
-    default:                     return "Launcher";
+    case SceneId::Notifications: return L10N("Notifications", "Notifiche");
+    case SceneId::Settings:      return L10N("Settings", "Impostazioni");
+    case SceneId::Block:         return L10N("Block", "Focus");
+    case SceneId::Priorities:    return L10N("Priorities", "Priorità");
+    case SceneId::Today:         return L10N("Today", "Oggi");
+    case SceneId::About:         return L10N("About", "Informazioni");
+    case SceneId::Reader:        return L10N("Reader", "Lettura");
+    case SceneId::Workout:       return L10N("Workout", "Allenamento");
+    case SceneId::FileTransfer:  return L10N("Transfer", "Trasferimento");
+    case SceneId::Launcher:      return L10N("Launcher", "Home");
+    default:                     return L10N("Launcher", "Home");
   }
 }
 

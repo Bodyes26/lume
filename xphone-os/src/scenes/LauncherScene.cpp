@@ -21,7 +21,7 @@ namespace {
 // Settings. Icon bitmaps come from IconStyle (Settings → Icon style packs);
 // the XPhoneIconPacks columns in LauncherIcons.h share this order.
 constexpr const char* kApps[LauncherScene::APP_COUNT] = {
-    "Today", "Notifications", "Priorities", "Block", "Read", "Workout",
+    L10N("Today", "Oggi"), L10N("Notifications", "Notifiche"), L10N("Priorities", "Priorità"), L10N("Block", "Focus"), L10N("Read", "Leggi"), L10N("Workout", "Allenamento"),
 };
 
 // 1bpp blitter for the ported artwork (format per LauncherIcons.h header;
@@ -126,17 +126,17 @@ void LauncherScene::handleInput(Input& in) {
   if (in.wasPressed(Btn::Down)) moveSelection(0, +1);
   if (in.wasPressed(Btn::Confirm)) {
     const char* app = kApps[_sel];
-    if (strcmp(app, "Block") == 0) {
+    if (strcmp(app, L10N("Block", "Focus")) == 0) {
       showBlock();
-    } else if (strcmp(app, "Priorities") == 0) {
+    } else if (strcmp(app, L10N("Priorities", "Priorità")) == 0) {
       showPriorities();
-    } else if (strcmp(app, "Today") == 0) {
+    } else if (strcmp(app, L10N("Today", "Oggi")) == 0) {
       showToday();
-    } else if (strcmp(app, "Notifications") == 0) {
+    } else if (strcmp(app, L10N("Notifications", "Notifiche")) == 0) {
       showNotifications();
-    } else if (strcmp(app, "Read") == 0) {
+    } else if (strcmp(app, L10N("Read", "Leggi")) == 0) {
       showReader();
-    } else if (strcmp(app, "Workout") == 0) {
+    } else if (strcmp(app, L10N("Workout", "Allenamento")) == 0) {
       showWorkout();
     }
   }
@@ -148,7 +148,7 @@ void LauncherScene::handleInput(Input& in) {
 
 const char* const* LauncherScene::softKeys() const {
   // Slot 0 (BACK button) opens Settings on the launcher; About lives inside it.
-  static constexpr const char* kKeys[4] = {"SETTINGS", "OPEN", "PREV", "NEXT"};
+  static constexpr const char* kKeys[4] = {L10N("SETTINGS", "IMPOSTA"), L10N("OPEN", "APRI"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
   return kKeys;
 }
 

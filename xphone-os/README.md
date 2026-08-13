@@ -5,15 +5,19 @@
 > detailed historical notes below describe the inherited upstream architecture;
 > where they conflict, the Lume handoff wins.
 
-Lume targets the **Xteink X3 only** (ESP32-C3, UC8253 792×528). The sole
-PlatformIO environment is `lume-x3`; a pre-display I²C fingerprint guard halts
-on non-X3 hardware. The reader and file-transfer server derive from CrossPoint
-(MIT), and hardware/display support comes from the vendored FreeInk SDK.
+Lume targets the **Xteink X3 only** (ESP32-C3, UC8253 792×528). Two
+PlatformIO environments build the same X3 firmware with one compile-time
+language each: `lume-x3-it` (default) and `lume-x3-en`. A pre-display I²C
+fingerprint guard halts on non-X3 hardware. The reader and file-transfer server
+derive from CrossPoint (MIT), and hardware/display support comes from the
+vendored FreeInk SDK.
 
-## Current Lume state (2026-08-13)
+## Current Lume state (2026-08-14)
 
-Firmware `0.1.0-dev`: X3-only build, `Lume X3` BLE identity, Lume on-glass
-wordmarks and X3-only release assets. The iOS app remains to be implemented.
+Firmware `0.1.0-dev`: X3-only, dedicated `Lume X3` BLE identity, Lume on-glass
+identity, and complete Italian/English compile-time localization. The native
+iOS companion in `../ios/` implements Priorities and Today/EventKit and has
+been verified on the physical iPhone/X3 path.
 
 **Product — six focus apps, 3×2 launcher:**
 * **Block** — triggers iOS Screen Time shields via the companion BLE protocol;
@@ -50,12 +54,13 @@ open), retry ≤3, ANCS backfill ≤20; a small sync dot sits left of the batter
 while syncing. Per-scene dirty scoping means an unrelated card never repaints
 the current scene.
 
-**Measured clean-build size (`lume-x3`):** 144,988 B static RAM (44.2% of
-327,680 B) and 2,526,151 B flash (38.5% of the 6.5 MB app partition).
+**Measured localized builds:** both use 144,996 B static RAM (44.2% of
+327,680 B). Italian uses 2,529,849 B flash and produces a 2,542,384 B image;
+English uses 2,529,125 B flash and produces a 2,541,664 B image.
 
 ### Dev workflow
-* Build: `../.venv/bin/pio run -e lume-x3`.
-* **Flash over USB**: `../.venv/bin/pio run -e lume-x3 -t upload
+* Build both locales: `../.venv/bin/pio run -e lume-x3-it -e lume-x3-en`.
+* **Flash Italian over USB**: `../.venv/bin/pio run -e lume-x3-it -t upload
   --upload-port /dev/cu.usbmodem*`. The X3 needs a 4-pin data pogo cable.
   Deep sleep drops the USB port; press power to wake before flashing.
 * **Serial**: 115200. Capture with a pyserial reset-and-read (DTR/RTS pulse);
@@ -175,26 +180,29 @@ accepts) to the SD root as `update.bin` and reboot. xphone-os flashes it into
 the other OTA slot and hands over. To flash the same image again later, rename
 `update.bin.flashed` back to `update.bin`.
 
-## Environment
+## Environments
 
-The only environment is an X3 clean cutover:
+Both environments target the same X3 hardware. Locale is compile-time; each
+image contains only its selected language.
 
-| env | device | panel | resolution |
-|-----|--------|-------|------------|
-| `lume-x3` (default) | Xteink X3 | UC8253 | 792×528 |
+| env | locale | device | panel | resolution |
+|-----|--------|--------|-------|------------|
+| `lume-x3-it` (default) | Italiano | Xteink X3 | UC8253 | 792×528 |
+| `lume-x3-en` | English | Xteink X3 | UC8253 | 792×528 |
 
 ## Build / flash
 
 ```bash
-../.venv/bin/pio run -e lume-x3
-../.venv/bin/pio run -e lume-x3 -t upload
+../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
+../.venv/bin/pio run -e lume-x3-it -t upload
 ../.venv/bin/pio device monitor --baud 115200
 ```
 
 ### Releases
 
-Tag `main` with `fw-vX.Y.Z` to have CI build and publish `lume-x3.bin`,
-`lume-x3-X.Y.Z.bin`, `update.bin`, a zip wrapper and checksums.
+Tag `main` with `fw-vX.Y.Z` to publish `update_it.bin`, `update_en.bin`,
+locale-specific unversioned/versioned images and zips, checksums, and a
+`latest.json` locale manifest.
 
 ## Upstream historical milestone record (M1–M5)
 

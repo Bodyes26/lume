@@ -77,24 +77,28 @@ Firmware:
 si spuntano col tasto; agenda reale che appare in Today; reconnect senza riavviare
 l'app. Tutti e tre i percorsi sono verificati su hardware.
 
-## v0.3 — Italiano completo con switcher
+## v0.3 — Italiano completo a compile time
+**Stato:** implementazione e build completate; verifica visiva su X3 pendente.
 
-Firmware (complessità media, ~6,1 KB di flash su ~4 MB liberi):
-* **263 stringhe uniche** censite (213 nelle scene + 36 status ANCS + 14 status BLE),
-  27 array soft-key statici → tabella `const char* const kStr[LANG][STR]` in flash +
-  `enum Str`, chiave NVS `lang` nel namespace `xphone` (stesso pattern di `IconStyle`).
-* I font UI coprono già `U+0020-007E`, `U+00A0-00FF`, `U+0100-017F`: accenti e `°` ci
-  sono (manca `€`). Attenzione alla larghezza dei tab soft-key: 103 px su X3 →
-  "CONFERMA" (112 px) sfora, servono etichette corte ("OK", "INDIETRO", "AVANTI").
-* Punti dove la lingua è nascosta nella logica: `strcmp(item.time,"All day")`,
-  `strcmp(item.kind,"reminder")`, suffissi `" sent"/" received"` del sync indicator,
-  plurali in Settings e File Transfer, `MTWTFSS` delle statistiche, e soprattutto le
-  **euristiche inglesi** di `BlockStatusStore` (`"min left"`, `"paused"`) → sostituite
-  da `state` obbligatorio, che la tua app manda sempre.
-* Le stringhe di orario/data arrivano **già formattate dal telefono**: 24h e °C sono
-  lavoro lato app, non firmware.
+Decisione aggiornata: niente switcher runtime. Il firmware produce due immagini,
+`lume-x3-it` (default) e `lume-x3-en`; `L10N()` seleziona un solo letterale nel
+preprocessore, quindi la lingua esclusa non occupa flash/RAM e non esistono stato
+NVS o cambio a caldo.
 
-*Prova*: switcher in Settings che cambia lingua a caldo, nessun tab troncato.
+Completato:
+* tutte le scene, splash, sleep e soft-key localizzati;
+* token BLE/JSON ed euristiche (`reminder`, `All day`, stati Block, suffissi
+  transfer) lasciati canonici;
+* `TODAY/TONIGHT/TOMORROW` tradotti soltanto al render;
+* plurali variadici corretti senza cambiare la lista argomenti;
+* workflow release con `update_it.bin`, `update_en.bin`, due zip e manifest per
+  locale;
+* build 2/2 `SUCCESS`, immagini ESP32-C3 valide e ricerca byte che prova
+  l'assenza della lingua non selezionata.
+
+*Prova residua*: flashare `lume-x3-it` e controllare sul vetro tab, righe lunghe,
+stati vuoti e glifi accentati. Dettagli in
+[13-personalizzazione-e-i18n.md](13-personalizzazione-e-i18n.md).
 
 ## v0.4 — Orologio vero (DS3231)
 

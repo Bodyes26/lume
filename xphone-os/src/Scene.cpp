@@ -9,7 +9,7 @@ SceneManager SCENES;
 RefreshStats gRefreshStats;
 
 const char* const* Scene::softKeys() const {
-  static constexpr const char* kDefault[4] = {"BACK", nullptr, nullptr, nullptr};
+  static constexpr const char* kDefault[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, nullptr};
   return kDefault;
 }
 

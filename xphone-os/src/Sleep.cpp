@@ -20,6 +20,7 @@
 #include "NotificationStore.h"
 #include "Gfx.h"
 #include "Input.h"
+#include "LumeLocale.h"
 #include "PrioritiesStore.h"
 #include "Scene.h"
 #include "TodayStore.h"
@@ -99,7 +100,8 @@ void drawSleepScreen(Gfx& gfx) {
     int slotY = gfx.height() - 108;
     if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
     PrioritiesScene::renderDormantFooter(gfx, slotY);
-    gfx.drawTextCentered(kFontSmall, gfx.width() / 2, gfx.height() - 56, "press power to wake");
+    gfx.drawTextCentered(kFontSmall, gfx.width() / 2, gfx.height() - 56,
+                         L10N("press power to wake", "premi accensione"));
   } else if (!PrioritiesScene::renderDormant(gfx)) {
     const int cx = gfx.width() / 2;
     const int wordmarkY = gfx.height() * 2 / 5;
@@ -118,7 +120,8 @@ void drawSleepScreen(Gfx& gfx) {
     if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
     PrioritiesScene::renderDormantFooter(gfx, slotY);
 
-    gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 56, "press power to wake");
+    gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 56,
+                         L10N("press power to wake", "premi accensione"));
   }
   // Ghost scrub: auto-sleep fires after minutes of an unchanged, differential-
   // refreshed image, and one FULL inversion pass can leave a faint imprint of

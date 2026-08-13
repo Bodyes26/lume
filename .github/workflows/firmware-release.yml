@@ -53,38 +53,46 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
 
-      - name: Build Lume for X3
-        run: cd xphone-os && pio run -e lume-x3
+      - name: Build Italian and English Lume for X3
+        run: cd xphone-os && pio run -e lume-x3-it -e lume-x3-en
 
       - name: Stage release assets
         run: |
           mkdir -p dist
-          cp xphone-os/.pio/build/lume-x3/firmware.bin dist/lume-x3.bin
-          cp dist/lume-x3.bin "dist/lume-x3-${VERSION}.bin"
-          # Pre-named for the SD updater so users skip the rename step.
-          cp dist/lume-x3.bin dist/update.bin
+          cp xphone-os/.pio/build/lume-x3-it/firmware.bin dist/update_it.bin
+          cp xphone-os/.pio/build/lume-x3-en/firmware.bin dist/update_en.bin
+          cp dist/update_it.bin dist/lume-x3-it.bin
+          cp dist/update_en.bin dist/lume-x3-en.bin
+          cp dist/update_it.bin "dist/lume-x3-it-${VERSION}.bin"
+          cp dist/update_en.bin "dist/lume-x3-en-${VERSION}.bin"
 
-          # Zip wrapper: a re-downloaded zip gets browser-renamed, but the
-          # update.bin inside keeps its exact name.
-          mkdir -p ziproot/lume-x3
-          cp dist/lume-x3.bin ziproot/lume-x3/update.bin
-          printf '%s\n' \
-            'Lume - Xteink X3 firmware' \
-            '' \
-            '1. Copy update.bin to the root of the microSD card.' \
-            '2. Put the card back in the X3.' \
-            '3. Hold the left side button and power together until the' \
-            '   update screen appears.' \
-            > ziproot/lume-x3/README.txt
-          (cd ziproot && zip -qr ../dist/lume-x3.zip lume-x3)
+          # Each zip keeps the boot updater's required update.bin name while
+          # its folder and archive make the selected locale unambiguous.
+          for locale in it en; do
+            mkdir -p "ziproot/lume-x3-${locale}"
+            cp "dist/update_${locale}.bin" "ziproot/lume-x3-${locale}/update.bin"
+            printf '%s\n' \
+              "Lume - Xteink X3 firmware (${locale})" \
+              '' \
+              '1. Copy update.bin to the root of the microSD card.' \
+              '2. Put the card back in the X3.' \
+              '3. Hold the left side button and power together until the' \
+              '   update screen appears.' \
+              > "ziproot/lume-x3-${locale}/README.txt"
+            (cd ziproot && zip -qr "../dist/lume-x3-${locale}.zip" "lume-x3-${locale}")
+          done
 
           (
             cd dist
             sha256sum \
-              lume-x3.zip \
-              update.bin \
-              lume-x3.bin \
-              "lume-x3-${VERSION}.bin" \
+              lume-x3-it.zip \
+              lume-x3-en.zip \
+              update_it.bin \
+              update_en.bin \
+              lume-x3-it.bin \
+              lume-x3-en.bin \
+              "lume-x3-it-${VERSION}.bin" \
+              "lume-x3-en-${VERSION}.bin" \
               > SHA256SUMS.txt
           )
 
@@ -105,8 +113,14 @@ jobs:
               "date": os.environ["RELEASE_DATE"],
               "assets": {
                   "x3": {
-                      "file": "lume-x3.bin",
-                      "sha256": sha256(dist / "lume-x3.bin"),
+                      "defaultLocale": "it",
+                      "locales": {
+                          locale: {
+                              "file": f"update_{locale}.bin",
+                              "sha256": sha256(dist / f"update_{locale}.bin"),
+                          }
+                          for locale in ("it", "en")
+                      },
                   },
               },
           }
