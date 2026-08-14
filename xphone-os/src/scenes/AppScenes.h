@@ -28,7 +28,7 @@ enum class SceneId : uint32_t {
   Notifications = 1,
   Settings = 2,
   Block = 3,
-  Priorities = 4,
+  Reminders = 4,
   Today = 5,
   About = 6,
   Reader = 7,
@@ -55,7 +55,7 @@ void showNotifications();
 void showSettings();    // M3: real Settings scene (SD update / restart / about)
 void showBlock();       // M3: real Block scene (Screen Time shields via BLE)
 void showBlockDeepWork();  // Launcher top-right long-press: open Block + start Deep Work
-void showPriorities();  // M3: real Priorities scene (to-do snapshot via BLE)
+void showReminders();  // Reminders scene (iOS Reminders lists via BLE)
 void showToday();       // M3: real Today scene (agenda/reminders/weather card)
 void showReader();      // R1 EPUB reader (resumes the last book; book list on BACK)
 void showWorkout();     // Workout: set-by-set exercise tracker synced from iPhone
@@ -73,8 +73,8 @@ void markLauncherDirtyIfActive();
 void markNotificationsDirtyIfActive();
 // M3: companion card revision changed (Block status card updates land here).
 void markBlockDirtyIfActive();
-// M3: same revision pump for the Priorities snapshot card.
-void markPrioritiesDirtyIfActive();
+// Reminders: revision pump for the reminders snapshot card.
+void markRemindersDirtyIfActive();
 // M3: same revision pump for the Today snapshot card.
 void markTodayDirtyIfActive();
 // Workout: revision pump for the workout snapshot card + local +/- bumps.

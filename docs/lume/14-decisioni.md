@@ -19,6 +19,11 @@ Registro delle scelte (13 agosto 2026) e delle risposte alle domande di
 | 10 | Card su link cifrato | **si fa** (fix da 2 punti, nessun costo d'uso: il pairing esiste già) |
 | 11 | RTC | **fatto e accettato in v0.4**: driver DS3231 in `xphone-os/src/Ds3231.{h,cpp}`, seed dell'orologio al boot, scrittura dal `time.sync`. Il "no RTC" del codice era dovuto all'X4; su questo X3 il tampone regge il power-off |
 | 12 | Tempo | nessuna scadenza; rilasci incrementali |
+| 13 | Cose da fare | **una sola fonte di verità: i Promemoria iOS** (deciso il 14/08/2026). Il database locale di priorità dell'app è eliminato: era una seconda casella di posta, e due caselle significano che nessuna è affidabile. L'app Lume non compete con Siri, condivisione, widget e date in linguaggio naturale di Apple |
+| 14 | Selezione | sul device arrivano solo le **liste di Promemoria scelte nell'app**, come schede, nell'ordine scelto. Non "tutti i promemoria aperti": l'inbox contiene decine di voci senza data e su e-ink diventerebbe rumore. Tetto: 4 liste, 40 voci nel pool, 20 per lista — il vincolo è il blocco heap contiguo da 32 KB del reader, non la RAM libera |
+| 15 | Spunta | dall'ereader si completa un promemoria: l'app scrive `EKReminder.isCompleted` in EventKit, quindi la spunta compare in Promemoria su iPhone, Mac e Watch. Già possibile con l'accesso in scrittura che l'app ha (nessun entitlement nuovo, nessun ADP) |
+| 16 | Today | **solo agenda**: eventi del calendario delle prossime 24 ore. Prima mostrava anche i promemoria, che quindi comparivano in due viste |
+| 17 | Protocollo (aggiorna la 5) | `priorities.snapshot`/`priority.toggle` **rimosse senza compatibilità**, sostituite da `reminders.snapshot`/`reminder.toggle` con maniglie `uint16` e contatore di generazione. Entrambi i lati sono nostri, quindi cutover pulito; la base wire-compatibile con l'app upstream non è più un vincolo |
 
 ## Cosa significavano i P0 di sicurezza, in concreto
 

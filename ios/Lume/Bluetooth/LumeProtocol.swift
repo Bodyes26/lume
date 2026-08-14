@@ -6,6 +6,8 @@ struct LumeDeviceAction: Decodable, Equatable, Sendable {
     let id: String?
     let done: Bool?
     let sequence: UInt32?
+    let gen: UInt16?
+    let handle: UInt16?
 }
 
 enum LumeProtocolError: LocalizedError, Equatable {
@@ -28,7 +30,12 @@ enum LumeProtocol {
     static let actionNotifyUUID = "F626E419-C6A8-4048-B684-98C4604D19A3"
     static let schemaVersion = 1
     static let maximumCardBytes = 512
-    static let maximumPriorityItems = 10
+    static let maximumReminderLists = 4
+    static let maximumReminderItems = 40
+    static let maximumRemindersPerList = 20
+    static let maximumReminderTitleCharacters = 96
+    static let maximumReminderDueCharacters = 16
+    static let maximumReminderListNameCharacters = 24
     static let maximumTodayItems = 6
 
     static func makeTimeSync(date: Date = .now, calendar: Calendar = .current) throws -> Data {
@@ -38,24 +45,36 @@ enum LumeProtocol {
         return try encode(TimeSyncPayload(day: day, minutesIntoDay: minutes))
     }
 
-    static func makePrioritySnapshots(
-        items: [PriorityItem],
+    static func makeReminderSnapshots(
+        lists: [ReminderList],
+        items: [ReminderItem],
+        generation: UInt16,
         maximumPayloadBytes: Int,
         now: Date = .now
     ) throws -> [Data] {
         let byteLimit = min(maximumCardBytes, maximumPayloadBytes)
         guard byteLimit >= 96 else { throw LumeProtocolError.payloadLimitTooSmall(byteLimit) }
 
-        let safeItems = Array(items.prefix(maximumPriorityItems)).map(SafePriority.init)
-        let identifier = "priorities-sync-\(Int(now.timeIntervalSince1970))"
-        let active = safeItems.lazy.filter { !$0.done }.count
-        let completed = safeItems.count - active
-        let summary = "\(active) da fare / \(completed) completate"
+        let safeLists = lists.prefix(maximumReminderLists).enumerated().map { index, list in
+            SafeReminderList(index: index, title: list.title)
+        }
+        let safeItems = items.prefix(maximumReminderItems).map(SafeReminder.init)
+        let identifier = "reminders-sync-\(Int(now.timeIntervalSince1970))"
+        let summary: String
+        if safeItems.isEmpty {
+            summary = "Nessun promemoria"
+        } else if safeItems.count == 1 {
+            summary = "1 da fare"
+        } else {
+            summary = "\(safeItems.count) da fare"
+        }
 
         if safeItems.isEmpty {
             let payload = try encodeSnapshot(
                 id: identifier,
                 body: summary,
+                generation: generation,
+                lists: safeLists,
                 part: 0,
                 parts: 1,
                 items: []
@@ -64,13 +83,20 @@ enum LumeProtocol {
             return [payload]
         }
 
-        var groups: [[SafePriority]] = []
-        var current: [SafePriority] = []
+        var groups: [[SafeReminder]] = []
+        var current: [SafeReminder] = []
 
         for item in safeItems {
             let candidate = current + [item]
-            // 9/10 is the worst field-width case for the protocol's ten-item cap.
-            let probe = try encodeSnapshot(id: identifier, body: summary, part: 9, parts: 10, items: candidate)
+            let probe = try encodeSnapshot(
+                id: identifier,
+                body: summary,
+                generation: generation,
+                lists: safeLists,
+                part: 9,
+                parts: 10,
+                items: candidate
+            )
             if probe.count <= byteLimit {
                 current = candidate
                 continue
@@ -80,7 +106,15 @@ enum LumeProtocol {
             groups.append(current)
             current = [item]
 
-            let single = try encodeSnapshot(id: identifier, body: summary, part: 9, parts: 10, items: current)
+            let single = try encodeSnapshot(
+                id: identifier,
+                body: summary,
+                generation: generation,
+                lists: safeLists,
+                part: 9,
+                parts: 10,
+                items: current
+            )
             guard single.count <= byteLimit else { throw LumeProtocolError.itemTooLarge(item.title) }
         }
         if !current.isEmpty { groups.append(current) }
@@ -90,6 +124,8 @@ enum LumeProtocol {
             let data = try encodeSnapshot(
                 id: identifier,
                 body: summary,
+                generation: generation,
+                lists: safeLists,
                 part: index,
                 parts: partCount,
                 items: group
@@ -107,43 +143,30 @@ enum LumeProtocol {
         locale: Locale = Locale(identifier: "it_IT")
     ) throws -> Data {
         let byteLimit = min(maximumCardBytes, maximumPayloadBytes)
-        let identifier = "today-sync-\(Int(now.timeIntervalSince1970))"
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = locale
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "HH:mm"
-        let sync = "Aggiornato \(formatter.string(from: now))"
+        guard byteLimit >= 96 else { throw LumeProtocolError.payloadLimitTooSmall(byteLimit) }
 
-        var packed: [SafeTodayEntry] = []
-        let empty = try encode(TodaySnapshotPayload(
+        let safeEntries = Array(entries.prefix(maximumTodayItems)).map(SafeTodayEntry.init)
+        let identifier = "today-sync-\(Int(now.timeIntervalSince1970))"
+        let syncFormatter = DateFormatter()
+        syncFormatter.calendar = calendar
+        syncFormatter.locale = locale
+        syncFormatter.dateFormat = "HH:mm"
+        let syncText = "Sinc. \(syncFormatter.string(from: now))"
+
+        let payload = try encode(TodaySnapshotPayload(
             id: identifier,
-            sync: sync,
-            items: []
+            sync: syncText,
+            items: safeEntries
         ))
-        guard empty.count <= byteLimit else {
+
+        guard payload.count <= byteLimit else {
+            if let first = safeEntries.first {
+                throw LumeProtocolError.itemTooLarge(first.title)
+            }
             throw LumeProtocolError.payloadLimitTooSmall(byteLimit)
         }
 
-        for entry in entries.prefix(maximumTodayItems).map(SafeTodayEntry.init) {
-            let candidate = packed + [entry]
-            let probe = try encode(TodaySnapshotPayload(
-                id: identifier,
-                sync: sync,
-                items: candidate
-            ))
-            guard probe.count <= byteLimit else {
-                if packed.isEmpty { throw LumeProtocolError.itemTooLarge(entry.title) }
-                break
-            }
-            packed = candidate
-        }
-
-        return try encode(TodaySnapshotPayload(
-            id: identifier,
-            sync: sync,
-            items: packed
-        ))
+        return payload
     }
 
     static func decodeAction(_ data: Data) throws -> LumeDeviceAction {
@@ -151,24 +174,26 @@ enum LumeProtocol {
     }
 
     private static func encode<T: Encodable>(_ value: T) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try encoder.encode(value)
+        try JSONEncoder().encode(value)
     }
 
     private static func encodeSnapshot(
         id: String,
         body: String,
+        generation: UInt16,
+        lists: [SafeReminderList],
         part: Int,
         parts: Int,
-        items: [SafePriority]
+        items: [SafeReminder]
     ) throws -> Data {
-        try encode(PrioritySnapshotPayload(
+        try encode(ReminderSnapshotPayload(
             id: id,
             body: body,
+            gen: generation,
             part: part,
             parts: parts,
-            priorityItems: items
+            reminderLists: lists,
+            reminderItems: items
         ))
     }
 }
@@ -180,16 +205,56 @@ private struct TimeSyncPayload: Encodable {
     let minutesIntoDay: Int
 }
 
-private struct PrioritySnapshotPayload: Encodable {
+private struct ReminderSnapshotPayload: Encodable {
     let schemaVersion = LumeProtocol.schemaVersion
     let type = "card"
-    let kind = "priorities.snapshot"
+    let kind = "reminders.snapshot"
     let id: String
-    let title = "Priorità"
+    let title = "Promemoria"
     let body: String
+    let gen: UInt16
     let part: Int
     let parts: Int
-    let priorityItems: [SafePriority]
+    let reminderLists: [SafeReminderList]
+    let reminderItems: [SafeReminder]
+}
+
+private struct SafeReminderList: Encodable {
+    let index: Int
+    let title: String
+
+    init(index: Int, title: String) {
+        self.index = index
+        self.title = title.prefixUTF8(maxBytes: 24)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.unkeyedContainer()
+        try values.encode(index)
+        try values.encode(title)
+    }
+}
+
+private struct SafeReminder: Encodable {
+    let handle: UInt16
+    let listIndex: Int
+    let title: String
+    let due: String
+
+    init(_ item: ReminderItem) {
+        handle = item.handle
+        listIndex = item.listIndex
+        title = item.title.prefixUTF8(maxBytes: 96)
+        due = item.dueLabel.prefixUTF8(maxBytes: 16)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.unkeyedContainer()
+        try values.encode(handle)
+        try values.encode(listIndex)
+        try values.encode(title)
+        try values.encode(due)
+    }
 }
 
 private struct TodaySnapshotPayload: Encodable {
@@ -224,28 +289,6 @@ private struct SafeTodayEntry: Encodable {
         try values.encode(title)
         try values.encode(subtitle)
         try values.encode(state)
-    }
-}
-
-private struct SafePriority: Encodable {
-    let id: String
-    let title: String
-    let note: String
-    let done: Bool
-
-    init(_ item: PriorityItem) {
-        id = item.id.prefixUTF8(maxBytes: 64)
-        title = item.title.prefixUTF8(maxBytes: 96)
-        note = item.note.prefixUTF8(maxBytes: 120)
-        done = item.isDone
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var values = encoder.unkeyedContainer()
-        try values.encode(id)
-        try values.encode(title)
-        try values.encode(note)
-        try values.encode(done)
     }
 }
 

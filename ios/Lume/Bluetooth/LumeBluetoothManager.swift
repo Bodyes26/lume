@@ -26,7 +26,7 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     @Published private(set) var lastSyncDate: Date?
     @Published private(set) var lastError: String?
 
-    private let priorities: PrioritiesStore
+    private let reminders: RemindersStore
     private let today: TodayStore
     private let defaults: UserDefaults
     private let lastPeripheralKey = "lume.lastPeripheralIdentifier.v2"
@@ -56,11 +56,11 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     private let actionNotifyUUID = CBUUID(string: LumeProtocol.actionNotifyUUID)
 
     init(
-        priorities: PrioritiesStore,
+        reminders: RemindersStore,
         today: TodayStore,
         defaults: UserDefaults = .standard
     ) {
-        self.priorities = priorities
+        self.reminders = reminders
         self.today = today
         self.defaults = defaults
         super.init()
@@ -188,12 +188,21 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
         }
     }
 
-    private func sendPriorities() {
+    func syncReminders() {
+        Task {
+            await reminders.refresh()
+            sendReminders()
+        }
+    }
+
+    private func sendReminders() {
         guard let peripheral = connectedPeripheral else { return }
         do {
             let maximum = peripheral.maximumWriteValueLength(for: .withResponse)
-            let payloads = try LumeProtocol.makePrioritySnapshots(
-                items: priorities.items,
+            let payloads = try LumeProtocol.makeReminderSnapshots(
+                lists: reminders.selectedLists,
+                items: reminders.items,
+                generation: reminders.generation,
                 maximumPayloadBytes: maximum
             )
             enqueue(payloads, marksLastAsSynced: true)
@@ -330,14 +339,17 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
         switch action.type {
         case "ready":
             break
-        case "priorities.sync.request":
-            sendPriorities()
+        case "reminders.sync.request":
+            syncReminders()
         case "today.sync.request":
             syncToday()
-        case "priority.toggle":
-            guard let id = action.id, let done = action.done else { return }
-            priorities.setDone(id: id, done: done)
-            sendPriorities()
+        case "reminder.toggle":
+            guard let handle = action.handle, let gen = action.gen else { return }
+            Task {
+                _ = await reminders.complete(handle: handle, generation: gen)
+                sendReminders()
+            }
+            break
         default:
             break
         }

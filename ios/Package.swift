@@ -16,15 +16,16 @@ let package = Package(
                 "App",
                 "Bluetooth/LumeBluetoothManager.swift",
                 "Design",
-                "Features/Priorities/PrioritiesStore.swift",
-                "Features/Priorities/PrioritiesView.swift",
+                "Features/Reminders/RemindersStore.swift",
+                "Features/Reminders/RemindersView.swift",
+                "Features/Reminders/ReminderListSelectionView.swift",
                 "Features/Today/TodayStore.swift",
                 "Features/Today/TodayView.swift",
                 "Resources"
             ],
             sources: [
                 "Bluetooth/LumeProtocol.swift",
-                "Features/Priorities/PriorityItem.swift",
+                "Features/Reminders/ReminderItem.swift",
                 "Features/Today/TodayEntry.swift",
                 "Features/Today/TodayProjection.swift"
             ]

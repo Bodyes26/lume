@@ -345,10 +345,10 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
 
   // MUST track the icon-pack COLUMN order, since the loop below pairs
   // kLabels[i] with IconStyle::iconForApp(i) -> XPhoneIconPacks[pack][i]:
-  // Today, Notifications, Priorities, Block, Read, Workout (LauncherIcons.h:2272-2273,
+  // Today, Notifications, Reminders, Block, Read, Workout (LauncherIcons.h:2272-2273,
   // the launcher's own kApps in LauncherScene.cpp:24-26). The stale prose at
   // LauncherIcons.h:6-7 lists a different order — the table is what indexes.
-  static constexpr const char* kLabels[6] = {L10N("Today", "Oggi"),  L10N("Notif", "Notif"), L10N("Priorities", "Priorità"),
+  static constexpr const char* kLabels[6] = {L10N("Today", "Oggi"),  L10N("Notif", "Notif"), L10N("Reminders", "Promemoria"),
                                              L10N("Block", "Focus"), L10N("Read", "Leggi"),  L10N("Workout", "Allenamento")};
 
   // Downscale 104 -> 72 by nearest-neighbor sampling into a stack buffer of

@@ -6,7 +6,7 @@
 #include "FileTransferScene.h"
 #include "LauncherScene.h"
 #include "NotificationsScene.h"
-#include "PrioritiesScene.h"
+#include "RemindersScene.h"
 #include "ReaderScene.h"
 #include "SettingsScene.h"
 #include "TodayScene.h"
@@ -28,7 +28,7 @@ AboutScene gAbout;
 NotificationsScene gNotifications;
 SettingsScene gSettings;
 BlockScene gBlock;
-PrioritiesScene gPriorities;
+RemindersScene gReminders;
 TodayScene gToday;
 WorkoutScene gWorkout;
 ReaderScene gReader;
@@ -66,9 +66,9 @@ void showBlockDeepWork() {
   gBlock.startDeepWork();   // then fire block.start(deep_work) immediately
 }
 
-void showPriorities() {
-  gCurrentSceneId = SceneId::Priorities;
-  SCENES.switchTo(gPriorities);
+void showReminders() {
+  gCurrentSceneId = SceneId::Reminders;
+  SCENES.switchTo(gReminders);
 }
 
 void showToday() {
@@ -110,7 +110,7 @@ void showSceneById(SceneId id) {
     case SceneId::Notifications: showNotifications(); break;
     case SceneId::Settings:      showSettings();      break;
     case SceneId::Block:         showBlock();         break;
-    case SceneId::Priorities:    showPriorities();    break;
+    case SceneId::Reminders:     showReminders();     break;
     case SceneId::Today:         showToday();         break;
     case SceneId::About:         showAbout();         break;
     case SceneId::Reader:        showReader();        break;
@@ -129,7 +129,7 @@ const char* sceneName(SceneId id) {
     case SceneId::Notifications: return L10N("Notifications", "Notifiche");
     case SceneId::Settings:      return L10N("Settings", "Impostazioni");
     case SceneId::Block:         return L10N("Block", "Focus");
-    case SceneId::Priorities:    return L10N("Priorities", "Priorità");
+    case SceneId::Reminders:     return L10N("Reminders", "Promemoria");
     case SceneId::Today:         return L10N("Today", "Oggi");
     case SceneId::About:         return L10N("About", "Informazioni");
     case SceneId::Reader:        return L10N("Reader", "Lettura");
@@ -152,8 +152,8 @@ void markBlockDirtyIfActive() {
   if (SCENES.active() == &gBlock) gBlock.markDirty();
 }
 
-void markPrioritiesDirtyIfActive() {
-  if (SCENES.active() == &gPriorities) gPriorities.markDirty();
+void markRemindersDirtyIfActive() {
+  if (SCENES.active() == &gReminders) gReminders.markDirty();
 }
 
 void markTodayDirtyIfActive() {

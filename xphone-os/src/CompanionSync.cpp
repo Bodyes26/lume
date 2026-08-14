@@ -15,14 +15,14 @@ namespace {
 // app: add a case here.
 constexpr int kRequestNone = -1;
 constexpr int kRequestBlock = 0;
-constexpr int kRequestPriorities = 1;
+constexpr int kRequestReminders = 1;
 constexpr int kRequestToday = 2;
 constexpr int kRequestWorkout = 3;
 
 int requestForSceneId(SceneId id) {
   switch (id) {
     case SceneId::Block:      return kRequestBlock;
-    case SceneId::Priorities: return kRequestPriorities;
+    case SceneId::Reminders:  return kRequestReminders;
     case SceneId::Today:      return kRequestToday;
     case SceneId::Workout:    return kRequestWorkout;
     default:                  return kRequestNone;  // Notifications/Launcher/Settings/About
@@ -34,7 +34,7 @@ int requestForSceneId(SceneId id) {
 bool sendRequest(int index) {
   switch (index) {
     case kRequestBlock:      return COMPANION_BLE.sendBlockStatus();
-    case kRequestPriorities: return COMPANION_BLE.sendPrioritiesSyncRequest();
+    case kRequestReminders:  return COMPANION_BLE.sendRemindersSyncRequest();
     case kRequestToday:      return COMPANION_BLE.sendTodaySyncRequest();
     case kRequestWorkout:    return COMPANION_BLE.sendWorkoutSyncRequest();
     default:                 return false;

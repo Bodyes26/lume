@@ -22,12 +22,12 @@
 #include "Gfx.h"
 #include "Input.h"
 #include "LumeLocale.h"
-#include "PrioritiesStore.h"
+#include "RemindersStore.h"
 #include "Scene.h"
 #include "TodayStore.h"
 #include "ble/CompanionBleService.h"
 #include "scenes/AppScenes.h"
-#include "scenes/PrioritiesScene.h"
+#include "scenes/RemindersScene.h"
 #include "scenes/WorkoutScene.h"
 #include "WorkoutStore.h"
 #include <ArduinoJson.h>
@@ -62,7 +62,7 @@ constexpr const char* kBlkTotalKey = "blkTotal";
 // Last Today / Priorities card JSON — re-seeded on wake so those scenes show
 // cached data (with a "syncing" indicator) instead of a blank screen.
 constexpr const char* kTodayCardKey = "todayCard";
-constexpr const char* kPrioCardKey = "prioCard";
+constexpr const char* kRemCardKey = "remCard";
 constexpr const char* kWorkoutCardKey = "wkCard";
 // Newest notifications as a raw Entry blob (NotificationStore::snapshot), so
 // the Notifications app shows the last-known list instantly on wake while the
@@ -111,11 +111,11 @@ void drawSleepScreen(Gfx& gfx) {
   // all sleep faces read as one design.
   if (gCurrentSceneId == SceneId::Workout && WorkoutScene::renderDormant(gfx)) {
     int slotY = gfx.height() - 108;
-    if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    PrioritiesScene::renderDormantFooter(gfx, slotY);
+    if (RemindersScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
+    RemindersScene::renderDormantFooter(gfx, slotY);
     gfx.drawTextCentered(kFontSmall, gfx.width() / 2, gfx.height() - 56,
                          L10N("press power to wake", "premi accensione"));
-  } else if (!PrioritiesScene::renderDormant(gfx)) {
+  } else if (!RemindersScene::renderDormant(gfx)) {
     const int cx = gfx.width() / 2;
     const int wordmarkY = gfx.height() * 2 / 5;
     gfx.drawTextCentered(kFontBold, cx, wordmarkY, "lume");
@@ -130,8 +130,8 @@ void drawSleepScreen(Gfx& gfx) {
     // faces read as one design.
     (void)ruleY;
     int slotY = gfx.height() - 108;
-    if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    PrioritiesScene::renderDormantFooter(gfx, slotY);
+    if (RemindersScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
+    RemindersScene::renderDormantFooter(gfx, slotY);
 
     gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 56,
                          L10N("press power to wake", "premi accensione"));
@@ -260,26 +260,33 @@ void sleepNow(Gfx& gfx, Input& input) {
       // cached data instead of the blank "Syncing" screen (seeded at boot).
       const std::string& todayJson = COMPANION_BLE.getLastTodayCard();
       if (!todayJson.empty()) prefs.putString(kTodayCardKey, todayJson.c_str());
-      // Priorities: serialized from the STORE, not the last phone card — a
+      // Reminders: serialized from the STORE, not the last phone card — a
       // multi-part snapshot's final card only carries the tail slice, so the
       // raw payload no longer represents the whole list.
-      if (PRIORITIES_STORE.count() > 0) {
+      if (REMINDERS_STORE.count() > 0) {
         JsonDocument doc;
-        doc["kind"] = "priorities.snapshot";
-        doc["id"] = "prio-persist";
-        doc["body"] = PRIORITIES_STORE.syncLine();
-        JsonArray items = doc["priorityItems"].to<JsonArray>();
-        PrioritiesStore::Item it;
-        for (std::size_t i = 0; PRIORITIES_STORE.get(i, it); i++) {
+        doc["kind"] = "reminders.snapshot";
+        doc["id"] = "rem-persist";
+        doc["body"] = REMINDERS_STORE.syncLine();
+        doc["gen"] = REMINDERS_STORE.generation();
+        JsonArray lists = doc["reminderLists"].to<JsonArray>();
+        for (std::size_t i = 0; i < REMINDERS_STORE.listCount(); i++) {
+          JsonArray row = lists.add<JsonArray>();
+          row.add(i);
+          row.add(REMINDERS_STORE.listName(i));
+        }
+        JsonArray items = doc["reminderItems"].to<JsonArray>();
+        RemindersStore::Item it;
+        for (std::size_t i = 0; REMINDERS_STORE.get(i, it); i++) {
           JsonArray row = items.add<JsonArray>();
-          row.add(it.id);
+          row.add(it.handle);
+          row.add(it.list);
           row.add(it.title);
-          row.add(it.note);
-          row.add(it.done);
+          row.add(it.due);
         }
         String out;
         serializeJson(doc, out);
-        prefs.putString(kPrioCardKey, out);
+        prefs.putString(kRemCardKey, out);
       }
 
       // Workout snapshot: serialized from the STORE, not the last phone card —
@@ -340,12 +347,12 @@ void sleepNow(Gfx& gfx, Input& input) {
   //    skip; no reply in time -> render whatever the store holds (empty ->
   //    wordmark fallback).
   if (COMPANION_BLE.isConnected()) {
-    const uint32_t rev0 = PRIORITIES_STORE.revision();
-    if (COMPANION_BLE.sendPrioritiesSyncRequest()) {
+    const uint32_t rev0 = REMINDERS_STORE.revision();
+    if (COMPANION_BLE.sendRemindersSyncRequest()) {
       const unsigned long tRequest = millis();
       while (millis() - tRequest < 3500UL) {
         COMPANION_BLE.processPending();
-        if (PRIORITIES_STORE.revision() != rev0) break;  // fresh snapshot landed
+        if (REMINDERS_STORE.revision() != rev0) break;  // fresh snapshot landed
         delay(25);
       }
     }
@@ -476,8 +483,10 @@ void seedPersistedBlock() {
   // data on wake (with a "syncing" indicator) instead of a blank sync screen.
   const String todayJson = prefs.getString(kTodayCardKey, "");
   if (todayJson.length() > 0) COMPANION_BLE.seedPersistedCard(std::string(todayJson.c_str()));
-  const String prioJson = prefs.getString(kPrioCardKey, "");
-  if (prioJson.length() > 0) COMPANION_BLE.seedPersistedCard(std::string(prioJson.c_str()));
+  // Reminders seed; also cleans the obsolete prioCard key once if present.
+  if (prefs.isKey("prioCard")) prefs.remove("prioCard");
+  const String remJson = prefs.getString(kRemCardKey, "");
+  if (remJson.length() > 0) COMPANION_BLE.seedPersistedCard(std::string(remJson.c_str()));
   const String workoutJson = prefs.getString(kWorkoutCardKey, "");
   if (workoutJson.length() > 0) COMPANION_BLE.seedPersistedCard(std::string(workoutJson.c_str()));
 

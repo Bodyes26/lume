@@ -42,9 +42,8 @@ class TodayScene : public Scene {
   // header — bounded by 6 items + <=6 dividers + 1 header.
   static constexpr int MAX_ROWS = 14;
   // DayDivider carries an event's day-bucket label (TONIGHT/TOMORROW/...) via
-  // its item index (the divider reads item.subtitle). SectionReminders is the
-  // single "Reminders" header. Item is an event or reminder row.
-  enum class RowType : uint8_t { DayDivider, SectionReminders, Item };
+  // its item index (the divider reads item.subtitle). Item is an event row.
+  enum class RowType : uint8_t { DayDivider, Item };
   struct Row {
     RowType type;
     int8_t item;  // TODAY_STORE index for Item/DayDivider, else -1

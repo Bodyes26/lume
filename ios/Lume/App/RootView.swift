@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var bluetooth: LumeBluetoothManager
-    @ObservedObject var priorities: PrioritiesStore
+    @ObservedObject var reminders: RemindersStore
     @ObservedObject var today: TodayStore
     @Environment(\.scenePhase) private var scenePhase
 
@@ -21,7 +21,11 @@ struct RootView: View {
                         onSync: bluetooth.syncToday
                     )
                     Divider().overlay(LumeTheme.hairline)
-                    PrioritiesView(store: priorities, isDeviceReady: bluetooth.phase.isReady)
+                    RemindersView(
+                        store: reminders,
+                        isDeviceReady: bluetooth.phase.isReady,
+                        onSync: bluetooth.syncReminders
+                    )
                 }
                 .padding(.horizontal, LumeSpace.medium)
                 .padding(.top, LumeSpace.compact)
@@ -33,7 +37,10 @@ struct RootView: View {
         .foregroundStyle(LumeTheme.ink)
         .onAppear {
             bluetooth.start()
-            Task { await today.refreshIfAuthorized() }
+            Task {
+                await today.refreshIfAuthorized()
+                await reminders.refreshIfAuthorized()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }

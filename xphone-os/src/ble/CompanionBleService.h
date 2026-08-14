@@ -75,7 +75,7 @@ class CompanionBleService final {
   // Last Today / Priorities card JSON (raw payload), stashed so Sleep can persist
   // them to NVS and re-seed the stores on wake — skipping the blank "Syncing"
   // screen. Main-loop only (set in applyCardPayload). "" until one arrives.
-  // (Priorities persists from PRIORITIES_STORE instead — a multi-part
+  // (Reminders persists from REMINDERS_STORE instead — a multi-part
   // snapshot's last raw payload is only the tail slice.)
   const std::string& getLastTodayCard() const { return lastTodayCardJson; }
   const std::string& getLastWorkoutCard() const { return lastWorkoutCardJson; }
@@ -107,11 +107,9 @@ class CompanionBleService final {
   bool sendBlockBreak(uint16_t minutes = 5);
   bool sendBlockStop();
   bool sendBlockStatus();
-  // M3 Priorities — same command JSON the x4-os service sends (x4-os
-  // CompanionBleService.cpp:915-918/984-1014); iOS answers both with a fresh
-  // "priorities.snapshot" card (PrioritiesManager.swift handleActionPayload).
-  bool sendPrioritiesSyncRequest();
-  bool sendPriorityToggle(const char* itemId, bool done);
+  // Reminders — "reminders.sync.request" command and "reminder.toggle" action.
+  bool sendRemindersSyncRequest();
+  bool sendReminderToggle(uint16_t handle, uint16_t gen, bool done = true);
   bool sendWorkoutSyncRequest();
   // Absolute completed-set count for one exercise (idempotent on the phone).
   bool sendWorkoutSet(const char* itemId, int done);

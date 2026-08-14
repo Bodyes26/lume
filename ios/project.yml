@@ -36,9 +36,9 @@ targets:
             CFBundleIconFiles:
               - AppIcon60
             UIPrerenderedIcon: false
-        NSBluetoothAlwaysUsageDescription: Lume usa Bluetooth per sincronizzare priorità, agenda, libri e stato del dispositivo X3.
+        NSBluetoothAlwaysUsageDescription: Lume usa Bluetooth per sincronizzare promemoria, agenda, libri e stato del dispositivo X3.
         NSCalendarsFullAccessUsageDescription: Lume legge gli appuntamenti delle prossime 24 ore per mostrarli sull’X3.
-        NSRemindersFullAccessUsageDescription: Lume legge i promemoria aperti per mostrarli sull’X3.
+        NSRemindersFullAccessUsageDescription: Lume legge e completa i promemoria selezionati per sincronizzarli con l’X3.
         UIBackgroundModes:
           - bluetooth-central
         UILaunchScreen: {}

@@ -7,7 +7,7 @@
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
 **Commit orologio DS3231 (v0.4):** `b2a515e`  
-**Fase:** v0.4 orologio hardware DS3231 completata, flashata e accettata sull'X3.
+**Fase:** integrazione Promemoria iOS completata su firmware e app: RemindersStore, RemindersScene con schede, Today solo agenda, nuovo poster di sleep; build IT/EN e 8 test Swift host tutti verdi.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -26,6 +26,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
 | Orologio hardware DS3231 | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 19:22:12`, OSF a 0, secondo boot un minuto dopo, ora coincidente col `time.sync`. Maurizio ha poi confermato vetro e tampone VBAT |
+| Promemoria iOS (sostituisce Priorities) | **IMPLEMENTATA, BUILD + TEST VERDI** | Firmware IT/EN SUCCESS (RAM 148.484 B, +3.488 B), 4 test host C++ verdi, 8 test Swift host verdi (Today + LumeProtocol), build iOS xcodebuild SUCCEEDED. Manca il flash/test hardware |
 
 ## Cosa è stato implementato in v0.1
 

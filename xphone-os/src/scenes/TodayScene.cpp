@@ -15,8 +15,6 @@ constexpr int kHeaderH = 46;  // same chrome as Notifications/Priorities/Block
 
 constexpr int kIcon = 22;         // day-divider / section icon box (square)
 constexpr int kIconGap = 12;      // icon -> label
-constexpr int kCheck = 22;        // reminder checkbox
-constexpr int kRemGutter = kCheck + 13;  // reminder title/time indent
 
 // Header (day divider / reminders) spacing: generous pad above, an icon+label
 // line vertically centered on the label. kIconVAdjust nudges the icon down onto
@@ -89,32 +87,13 @@ void drawSun(Gfx& g, int x, int y, int d) {
   g.fillRect(cx + dd - 1, cy + dd - 1, 3, 3, true);
 }
 
-// Empty rounded checkbox (todo affordance for individual reminders).
-void drawCheckbox(Gfx& g, int x, int y, int s) {
-  g.drawRoundedRect(x, y, s, s, 3, 2, true);
-}
-
-// Bell (Reminders section header) — a filled dome over a flared body with a
-// rim, clapper and top nub. Filled to match the moon; not a checkbox (which
-// reads as an actionable todo, confusing on a section header).
-void drawBell(Gfx& g, int x, int y, int d) {
-  const int cx = x + d / 2;
-  const int r = (d * 7) / 20;             // dome radius (~0.35 d)
-  const int domeCy = y + d / 2 - 1;
-  g.fillRoundedRect(cx - r, domeCy - r, 2 * r, 2 * r, r, true);   // dome
-  const int baseW = (d * 4) / 5, baseY = domeCy, baseH = (d * 3) / 10;
-  g.fillRect(cx - baseW / 2, baseY, baseW, baseH, true);          // flared body
-  g.fillRect(cx - baseW / 2 - 2, baseY + baseH, baseW + 4, 2, true);  // rim
-  g.fillRect(cx - 2, baseY + baseH + 3, 4, 3, true);             // clapper
-  g.fillRect(cx - 2, domeCy - r - 3, 4, 3, true);               // top nub
-}
 
 }  // namespace
 
-// buildRows: events first, grouped by day bucket — a DayDivider is emitted each
-// time the bucket (item.subtitle, e.g. "TONIGHT"/"TOMORROW", set by the iOS
-// producer) changes. Reminders follow under one "Reminders" header. The phone
-// owns the sort; we only insert the dividers/header.
+// buildRows: calendar events grouped by day bucket — a DayDivider is emitted
+// each time the bucket (item.subtitle, e.g. "TONIGHT"/"TOMORROW", set by the
+// iOS producer) changes. Today is now agenda-only (reminders live in the
+// Reminders scene).
 int TodayScene::buildRows(Row (&rows)[MAX_ROWS]) const {
   int n = 0;
   TodayStore::Item item;
@@ -124,23 +103,10 @@ int TodayScene::buildRows(Row (&rows)[MAX_ROWS]) const {
   const int count = static_cast<int>(TODAY_STORE.count());
   for (int i = 0; i < count && n < MAX_ROWS - 1; i++) {
     if (!TODAY_STORE.get(static_cast<std::size_t>(i), item)) continue;
-    if (strcmp(item.kind, "reminder") == 0) continue;  // events only in this pass
     if (!haveBucket || strcmp(item.subtitle, lastBucket) != 0) {
       rows[n++] = Row{RowType::DayDivider, static_cast<int8_t>(i)};
       snprintf(lastBucket, sizeof(lastBucket), "%s", item.subtitle);
       haveBucket = true;
-    }
-    rows[n++] = Row{RowType::Item, static_cast<int8_t>(i)};
-  }
-
-  bool remHeader = false;
-  for (int i = 0; i < count && n < MAX_ROWS; i++) {
-    if (!TODAY_STORE.get(static_cast<std::size_t>(i), item)) continue;
-    if (strcmp(item.kind, "reminder") != 0) continue;
-    if (!remHeader) {
-      if (n >= MAX_ROWS - 1) break;
-      rows[n++] = Row{RowType::SectionReminders, -1};
-      remHeader = true;
     }
     rows[n++] = Row{RowType::Item, static_cast<int8_t>(i)};
   }
@@ -264,7 +230,6 @@ void TodayScene::render(Gfx& gfx) {
   auto rowH = [](const Row& r) {
     switch (r.type) {
       case RowType::DayDivider: return kDividerRowH;
-      case RowType::SectionReminders: return kSectionRowH;
       case RowType::Item:
       default: return kItemRowH;
     }
@@ -290,7 +255,6 @@ void TodayScene::render(Gfx& gfx) {
   TodayStore::Item item;
   for (int i = _scroll; i < rowCount; i++) {
     const Row& r = rows[i];
-    if (y + rowH(r) > bottom) break;
     switch (r.type) {
       case RowType::DayDivider: {
         if (!TODAY_STORE.get(static_cast<std::size_t>(r.item), item)) break;
@@ -309,22 +273,13 @@ void TodayScene::render(Gfx& gfx) {
         gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, displayLabel);
         break;
       }
-      case RowType::SectionReminders: {
-        const int labelTop = y + kHeadTopPad;
-        drawBell(gfx, kMarginX, labelTop + kIconVAdjust, kIcon);
-        gfx.drawText(kFontBold, kMarginX + kIcon + kIconGap, labelTop, L10N("REMINDERS", "PROMEMORIA"));
-        break;
-      }
       case RowType::Item:
       default: {
         if (!TODAY_STORE.get(static_cast<std::size_t>(r.item), item)) break;
-        const bool reminder = strcmp(item.kind, "reminder") == 0;
-        const int textX = reminder ? kMarginX + kRemGutter : kMarginX;
-        const int lineW = reminder ? textW - kRemGutter : textW;
-        // Checkbox on individual reminders, vertically nudged onto the block.
-        if (reminder) drawCheckbox(gfx, kMarginX, y + 6, kCheck);
+        const int textX = kMarginX;
+        const int lineW = textW;
 
-        // Line 1: time (event) or due label (reminder) — small/light, above.
+        // Line 1: time — small/light, above.
         if (item.time[0]) {
           char t[56];
           truncateToWidth(gfx, kFontSmall, item.time, lineW, t, sizeof(t));

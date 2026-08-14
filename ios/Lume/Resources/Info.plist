@@ -32,12 +32,12 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Lume usa Bluetooth per sincronizzare promemoria, agenda, libri e stato del dispositivo X3.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Lume legge gli appuntamenti delle prossime 24 ore per mostrarli sull’X3.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Lume usa Bluetooth per sincronizzare priorità, agenda, libri e stato del dispositivo X3.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Lume legge i promemoria aperti per mostrarli sull’X3.</string>
+	<string>Lume legge e completa i promemoria selezionati per sincronizzarli con l’X3.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

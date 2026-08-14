@@ -8,21 +8,22 @@
 
 /* Begin PBXBuildFile section */
 		067365BA1450DECE081E017D /* 03_LighthouseTower.svg in Resources */ = {isa = PBXBuildFile; fileRef = 8670B5AFC7C49F61C2F097B4 /* 03_LighthouseTower.svg */; };
+		06E1FA906D1D427BE9056F2E /* RemindersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D3901B0D0587BB79F5CDB94 /* RemindersView.swift */; };
 		0FA89CA94A729693353CA4FD /* 04_LighthouseStar.svg in Resources */ = {isa = PBXBuildFile; fileRef = BFB2FCD9D93C6E9E93EDFC48 /* 04_LighthouseStar.svg */; };
 		151D117B8755B07FEA046BB4 /* TodayProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F263DB6C70F5C5EB2E80148 /* TodayProjection.swift */; };
 		2048B3BCD12AE93852471B45 /* 06_Elements_Dark.svg in Resources */ = {isa = PBXBuildFile; fileRef = C775C3CD1F40A348FBC8502E /* 06_Elements_Dark.svg */; };
 		26FF130FBB1B834877DA2872 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1C8D787A41B2CA945741816C /* AppIcon.icon */; };
+		2ECCB011E60060178298E708 /* RemindersStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45A0D0350DE43C4BAE31E1A /* RemindersStore.swift */; };
 		37F7F86AB724F71AC231CCDB /* LumeMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEF40D615CDEE23786C4E4D /* LumeMark.swift */; };
 		4105FA5165E067D37AEF8608 /* LumeProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD95C8F3A2A405DEF8270F75 /* LumeProtocolTests.swift */; };
 		47B0AC4694FB271A94B8153A /* LumeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078EF2DA8DDA212B59798ED9 /* LumeProtocol.swift */; };
-		49F26354885BDABBD8458F1D /* PrioritiesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1265FED2FEF8FBA90D4CA6 /* PrioritiesView.swift */; };
-		4E9835D5AC7F23EBF14A06BD /* PriorityItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1871AA0BB343B184DA4BAFFE /* PriorityItem.swift */; };
 		7174D7CFF1F30E0E71AC9050 /* LumeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BEE23B93A94D105C0A987F /* LumeApp.swift */; };
 		7E60D308DB208FE63C441695 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C5B9C52E9C3FF4BF88220FD /* TodayView.swift */; };
+		920A1A3E96133E90FABB9486 /* ReminderListSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA398645F0ADC7EA14EFE34B /* ReminderListSelectionView.swift */; };
+		A01D13A74DF4F902FC1A7E35 /* ReminderItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD141A0790E94D15F556DE4 /* ReminderItem.swift */; };
 		A726CF144F385946F7DD113A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31FE09EC8BA0521FE291604 /* AppModel.swift */; };
 		AB880CDD6932AE4B2F0910B6 /* AppIcon60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 576E60FA0F3ABBD2F0CCA8D2 /* AppIcon60@2x.png */; };
 		B89D069AA031EA93CCC417B8 /* 01_Background.svg in Resources */ = {isa = PBXBuildFile; fileRef = 583A42875F2B015DF25334AB /* 01_Background.svg */; };
-		BC91A8BFD1AA2085ECAFD452 /* PrioritiesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C5556A610747FEE422E35B2 /* PrioritiesStore.swift */; };
 		BD2FD25E660A2BB23CF6C18B /* 01_Background_Dark.svg in Resources */ = {isa = PBXBuildFile; fileRef = BD4B36FA353CF009DCCE6ED6 /* 01_Background_Dark.svg */; };
 		C1289C304962366AE04CB9E1 /* 05_OrientationCorona.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0FBB496B17AB3363EB2477B6 /* 05_OrientationCorona.svg */; };
 		C90C84CF726D4CAEA7C005EF /* 02_Horizon.svg in Resources */ = {isa = PBXBuildFile; fileRef = 38118D2B0BE3830EF99339AB /* 02_Horizon.svg */; };
@@ -52,27 +53,28 @@
 		0D7306206A6E4DF0D83AE6D4 /* AppIcon60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60@3x.png"; sourceTree = "<group>"; };
 		0FBB496B17AB3363EB2477B6 /* 05_OrientationCorona.svg */ = {isa = PBXFileReference; path = 05_OrientationCorona.svg; sourceTree = "<group>"; };
 		0FFE4586B021941AF3F4C1C4 /* Lume.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Lume.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1871AA0BB343B184DA4BAFFE /* PriorityItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriorityItem.swift; sourceTree = "<group>"; };
 		1C8D787A41B2CA945741816C /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		1D3901B0D0587BB79F5CDB94 /* RemindersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersView.swift; sourceTree = "<group>"; };
 		2C5B9C52E9C3FF4BF88220FD /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		38118D2B0BE3830EF99339AB /* 02_Horizon.svg */ = {isa = PBXFileReference; path = 02_Horizon.svg; sourceTree = "<group>"; };
 		3BD33722199521AF66C9AE2C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		43EE9D5FF26F7268D4562457 /* TodayEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayEntry.swift; sourceTree = "<group>"; };
 		576E60FA0F3ABBD2F0CCA8D2 /* AppIcon60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60@2x.png"; sourceTree = "<group>"; };
 		583A42875F2B015DF25334AB /* 01_Background.svg */ = {isa = PBXFileReference; path = 01_Background.svg; sourceTree = "<group>"; };
-		6C5556A610747FEE422E35B2 /* PrioritiesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrioritiesStore.swift; sourceTree = "<group>"; };
 		6F263DB6C70F5C5EB2E80148 /* TodayProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayProjection.swift; sourceTree = "<group>"; };
 		8670B5AFC7C49F61C2F097B4 /* 03_LighthouseTower.svg */ = {isa = PBXFileReference; path = 03_LighthouseTower.svg; sourceTree = "<group>"; };
 		9766F1472B5B31F05E3C143A /* TodayStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayStore.swift; sourceTree = "<group>"; };
 		9A4BEBF819005878AD70654C /* TodayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayTests.swift; sourceTree = "<group>"; };
+		AA398645F0ADC7EA14EFE34B /* ReminderListSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderListSelectionView.swift; sourceTree = "<group>"; };
 		BCEF40D615CDEE23786C4E4D /* LumeMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeMark.swift; sourceTree = "<group>"; };
 		BD4B36FA353CF009DCCE6ED6 /* 01_Background_Dark.svg */ = {isa = PBXFileReference; path = 01_Background_Dark.svg; sourceTree = "<group>"; };
 		BFB2FCD9D93C6E9E93EDFC48 /* 04_LighthouseStar.svg */ = {isa = PBXFileReference; path = 04_LighthouseStar.svg; sourceTree = "<group>"; };
 		C31FE09EC8BA0521FE291604 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		C775C3CD1F40A348FBC8502E /* 06_Elements_Dark.svg */ = {isa = PBXFileReference; path = 06_Elements_Dark.svg; sourceTree = "<group>"; };
+		CCD141A0790E94D15F556DE4 /* ReminderItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderItem.swift; sourceTree = "<group>"; };
 		CD95C8F3A2A405DEF8270F75 /* LumeProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeProtocolTests.swift; sourceTree = "<group>"; };
 		D07852753B3A3FD362F10635 /* LumeTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumeTheme.swift; sourceTree = "<group>"; };
-		FA1265FED2FEF8FBA90D4CA6 /* PrioritiesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrioritiesView.swift; sourceTree = "<group>"; };
+		D45A0D0350DE43C4BAE31E1A /* RemindersStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersStore.swift; sourceTree = "<group>"; };
 		FE97FEC434BC0AEE89BE0C9B /* LumeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LumeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -151,6 +153,17 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		5F172B6A937020613086F25F /* Reminders */ = {
+			isa = PBXGroup;
+			children = (
+				CCD141A0790E94D15F556DE4 /* ReminderItem.swift */,
+				AA398645F0ADC7EA14EFE34B /* ReminderListSelectionView.swift */,
+				D45A0D0350DE43C4BAE31E1A /* RemindersStore.swift */,
+				1D3901B0D0587BB79F5CDB94 /* RemindersView.swift */,
+			);
+			path = Reminders;
+			sourceTree = "<group>";
+		};
 		C2358255B6405E2CB603E22B = {
 			isa = PBXGroup;
 			children = (
@@ -183,20 +196,10 @@
 		F44BA776020BB8AB72CDD3FB /* Features */ = {
 			isa = PBXGroup;
 			children = (
-				F79D1C91925DD4322EABF5BF /* Priorities */,
+				5F172B6A937020613086F25F /* Reminders */,
 				E3B282A61EF8AFD6CD9A6E18 /* Today */,
 			);
 			path = Features;
-			sourceTree = "<group>";
-		};
-		F79D1C91925DD4322EABF5BF /* Priorities */ = {
-			isa = PBXGroup;
-			children = (
-				6C5556A610747FEE422E35B2 /* PrioritiesStore.swift */,
-				FA1265FED2FEF8FBA90D4CA6 /* PrioritiesView.swift */,
-				1871AA0BB343B184DA4BAFFE /* PriorityItem.swift */,
-			);
-			path = Priorities;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -308,9 +311,10 @@
 				37F7F86AB724F71AC231CCDB /* LumeMark.swift in Sources */,
 				47B0AC4694FB271A94B8153A /* LumeProtocol.swift in Sources */,
 				F9BC2E9BDCBE5782CF67BF60 /* LumeTheme.swift in Sources */,
-				BC91A8BFD1AA2085ECAFD452 /* PrioritiesStore.swift in Sources */,
-				49F26354885BDABBD8458F1D /* PrioritiesView.swift in Sources */,
-				4E9835D5AC7F23EBF14A06BD /* PriorityItem.swift in Sources */,
+				A01D13A74DF4F902FC1A7E35 /* ReminderItem.swift in Sources */,
+				920A1A3E96133E90FABB9486 /* ReminderListSelectionView.swift in Sources */,
+				2ECCB011E60060178298E708 /* RemindersStore.swift in Sources */,
+				06E1FA906D1D427BE9056F2E /* RemindersView.swift in Sources */,
 				D9FCC0240675D289D119718A /* RootView.swift in Sources */,
 				DABB8F971B825F8E7C760509 /* TodayEntry.swift in Sources */,
 				151D117B8755B07FEA046BB4 /* TodayProjection.swift in Sources */,

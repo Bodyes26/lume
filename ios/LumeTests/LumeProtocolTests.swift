@@ -22,77 +22,139 @@ final class LumeProtocolTests: XCTestCase {
         XCTAssertEqual(json["minutesIntoDay"] as? Int, 1_265)
     }
 
-    func testPrioritySnapshotMatchesFirmwareContract() throws {
+    func testReminderSnapshotMatchesFirmwareContract() throws {
+        let lists = [
+            ReminderList(id: "cal-today", title: "Oggi"),
+            ReminderList(id: "cal-home", title: "Casa")
+        ]
         let items = [
-            PriorityItem(id: "p1", title: "Finire la specifica BLE", note: "oggi", isDone: false),
-            PriorityItem(id: "p2", title: "Chiamare la banca", isDone: true)
+            ReminderItem(
+                id: "rem-1",
+                handle: 17,
+                listIndex: 0,
+                title: "Chiamare il commercialista",
+                dueLabel: "Oggi 09:00",
+                isOverdue: false
+            ),
+            ReminderItem(
+                id: "rem-2",
+                handle: 18,
+                listIndex: 1,
+                title: "Comprare lampadine",
+                dueLabel: "",
+                isOverdue: false
+            )
         ]
 
-        let payloads = try LumeProtocol.makePrioritySnapshots(
+        let payloads = try LumeProtocol.makeReminderSnapshots(
+            lists: lists,
             items: items,
+            generation: 41,
             maximumPayloadBytes: 512,
-            now: Date(timeIntervalSince1970: 1_755_000_000)
+            now: Date(timeIntervalSince1970: 1_786_717_487)
         )
 
         XCTAssertEqual(payloads.count, 1)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: payloads[0]) as? [String: Any])
         XCTAssertEqual(json["type"] as? String, "card")
-        XCTAssertEqual(json["kind"] as? String, "priorities.snapshot")
-        XCTAssertEqual(json["id"] as? String, "priorities-sync-1755000000")
-        XCTAssertEqual(json["title"] as? String, "Priorità")
+        XCTAssertEqual(json["kind"] as? String, "reminders.snapshot")
+        XCTAssertEqual(json["id"] as? String, "reminders-sync-1786717487")
+        XCTAssertEqual(json["title"] as? String, "Promemoria")
+        XCTAssertEqual(json["body"] as? String, "2 da fare")
+        XCTAssertEqual(json["gen"] as? Int, 41)
         XCTAssertEqual(json["part"] as? Int, 0)
         XCTAssertEqual(json["parts"] as? Int, 1)
 
-        let wireItems = try XCTUnwrap(json["priorityItems"] as? [[Any]])
+        let wireLists = try XCTUnwrap(json["reminderLists"] as? [[Any]])
+        XCTAssertEqual(wireLists.count, 2)
+        XCTAssertEqual(wireLists[0][0] as? Int, 0)
+        XCTAssertEqual(wireLists[0][1] as? String, "Oggi")
+        XCTAssertEqual(wireLists[1][0] as? Int, 1)
+        XCTAssertEqual(wireLists[1][1] as? String, "Casa")
+
+        let wireItems = try XCTUnwrap(json["reminderItems"] as? [[Any]])
         XCTAssertEqual(wireItems.count, 2)
-        XCTAssertEqual(wireItems[0][0] as? String, "p1")
-        XCTAssertEqual(wireItems[0][1] as? String, "Finire la specifica BLE")
-        XCTAssertEqual(wireItems[0][2] as? String, "oggi")
-        XCTAssertEqual(wireItems[0][3] as? Bool, false)
-        XCTAssertEqual(wireItems[1][3] as? Bool, true)
+        XCTAssertEqual(wireItems[0][0] as? Int, 17)
+        XCTAssertEqual(wireItems[0][1] as? Int, 0)
+        XCTAssertEqual(wireItems[0][2] as? String, "Chiamare il commercialista")
+        XCTAssertEqual(wireItems[0][3] as? String, "Oggi 09:00")
+        XCTAssertEqual(wireItems[1][0] as? Int, 18)
+        XCTAssertEqual(wireItems[1][1] as? Int, 1)
+        XCTAssertEqual(wireItems[1][2] as? String, "Comprare lampadine")
+        XCTAssertEqual(wireItems[1][3] as? String, "")
     }
 
-    func testPrioritySnapshotSplitsInOrderWithinNegotiatedLimit() throws {
-        let items = (1...8).map { index in
-            PriorityItem(
-                id: "priority-\(index)",
-                title: "Priorità numero \(index) con un titolo concreto",
-                note: "Nota utile per la priorità numero \(index)",
-                isDone: index.isMultiple(of: 3)
+    func testReminderSnapshotEmptyListShowsNoRemindersSummary() throws {
+        let lists = [ReminderList(id: "cal-today", title: "Oggi")]
+        let payloads = try LumeProtocol.makeReminderSnapshots(
+            lists: lists,
+            items: [],
+            generation: 1,
+            maximumPayloadBytes: 512,
+            now: Date(timeIntervalSince1970: 1_786_717_487)
+        )
+
+        XCTAssertEqual(payloads.count, 1)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: payloads[0]) as? [String: Any])
+        XCTAssertEqual(json["body"] as? String, "Nessun promemoria")
+        let wireItems = try XCTUnwrap(json["reminderItems"] as? [[Any]])
+        XCTAssertTrue(wireItems.isEmpty)
+    }
+
+    func testReminderSnapshotSplitsInOrderWithinNegotiatedLimit() throws {
+        let lists = [ReminderList(id: "cal-work", title: "Lavoro")]
+        let items = (1...12).map { index in
+            ReminderItem(
+                id: "rem-\(index)",
+                handle: UInt16(index),
+                listIndex: 0,
+                title: "Promemoria numero \(index) con testo concreto per il test di split",
+                dueLabel: "Oggi 1\(index % 10):00",
+                isOverdue: false
             )
         }
         let maximumBytes = 360
 
-        let payloads = try LumeProtocol.makePrioritySnapshots(
+        let payloads = try LumeProtocol.makeReminderSnapshots(
+            lists: lists,
             items: items,
+            generation: 7,
             maximumPayloadBytes: maximumBytes,
-            now: Date(timeIntervalSince1970: 1_755_000_001)
+            now: Date(timeIntervalSince1970: 1_786_717_488)
         )
 
         XCTAssertGreaterThan(payloads.count, 1)
-        var recoveredIDs: [String] = []
+        var recoveredHandles: [Int] = []
         for (index, payload) in payloads.enumerated() {
             XCTAssertLessThanOrEqual(payload.count, maximumBytes)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
-            XCTAssertEqual(json["id"] as? String, "priorities-sync-1755000001")
+            XCTAssertEqual(json["id"] as? String, "reminders-sync-1786717488")
+            XCTAssertEqual(json["gen"] as? Int, 7)
             XCTAssertEqual(json["part"] as? Int, index)
             XCTAssertEqual(json["parts"] as? Int, payloads.count)
-            let wireItems = try XCTUnwrap(json["priorityItems"] as? [[Any]])
-            recoveredIDs.append(contentsOf: wireItems.compactMap { $0.first as? String })
+
+            let wireLists = try XCTUnwrap(json["reminderLists"] as? [[Any]])
+            XCTAssertEqual(wireLists.count, 1)
+            XCTAssertEqual(wireLists[0][1] as? String, "Lavoro")
+
+            let wireItems = try XCTUnwrap(json["reminderItems"] as? [[Any]])
+            recoveredHandles.append(contentsOf: wireItems.compactMap { $0.first as? Int })
         }
-        XCTAssertEqual(recoveredIDs, items.map(\.id))
+        XCTAssertEqual(recoveredHandles, items.map { Int($0.handle) })
     }
 
-    func testPriorityToggleActionDecodes() throws {
-        let data = Data(#"{"schemaVersion":1,"type":"priority.toggle","id":"p1","done":true,"sequence":7}"#.utf8)
+    func testReminderToggleActionDecodes() throws {
+        let data = Data(#"{"schemaVersion":1,"type":"reminder.toggle","gen":41,"handle":17,"done":true,"sequence":7}"#.utf8)
         let action = try LumeProtocol.decodeAction(data)
 
         XCTAssertEqual(action, LumeDeviceAction(
             schemaVersion: 1,
-            type: "priority.toggle",
-            id: "p1",
+            type: "reminder.toggle",
+            id: nil,
             done: true,
-            sequence: 7
+            sequence: 7,
+            gen: 41,
+            handle: 17
         ))
     }
 }

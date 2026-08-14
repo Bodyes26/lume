@@ -86,42 +86,75 @@ Chiavi comuni lette da `applyCardPayload` (`src/ble/CompanionBleService.cpp:851-
 | `source` | string **oppure** oggetto `{displayName\|app}` | `"iPhone"` | 64 | etichetta sorgente (solo diagnostica) |
 | `actions[]` | array di `{id,label}` | — | max 4, id 64, label 32 | **parsati ma mai usati** (attrito 3) |
 | `items[]` | array (Today) | — | max 6 | vedi §5.2 |
-| `priorityItems[]` | array | — | max 10 | vedi §5.1 |
+| `reminderItems[]` | array | — | max 40 | vedi §5.1 |
+| `reminderLists[]` | array di `[index,nome]` | — | max 4, nome 24 | solo nella parte 0; vedi §5.1 |
+| `gen` | uint16 | — | — | generazione della mappa maniglia→promemoria (§5.1) |
 | `workoutItems[]` | array | — | max 8 | vedi §5.3 |
 | `mailItems[]`, `mailSource`, `mailSync` | — | — | max 8 | **parsati e mai letti da nessuno** (attrito 2) |
 
 Routing verso gli store (`:984-1012`):
 
-* Priorities: `kind == "priorities.snapshot"` **oppure** `id` inizia con `priorities-sync-` **oppure** `priorityItems` non vuoto.
+* Reminders: `kind == "reminders.snapshot"` **oppure** `id` inizia con `reminders-sync-`.
 * Today: `kind == "today.snapshot"` oppure `id` inizia con `today-sync-`. Il payload grezzo viene anche memorizzato per la persistenza NVS.
 * Workout: `kind == "workout.snapshot"` oppure `id` inizia con `workout-sync-`.
 * Block: `id == "block-status"` (esatto).
 
-### 5.1 priorities.snapshot
+### 5.1 reminders.snapshot
 
-Item accettato come **array di 4 elementi** `[id, title, note, done]` o come oggetto `{id,title,note,done}` (`:937-954`). Cap: 10 item, `id` 64 B, `title` 96 B, `note` 120 B, `done` bool (default false). Lo store espone `count()`, il tally attivi/fatti, e `body` come riga di sync (`src/PrioritiesStore.h:31-58`).
+**Sostituisce `priorities.snapshot` (rimossa, senza compatibilità).** Decisione di prodotto
+registrata in [14-decisioni.md](14-decisioni.md): la fonte di verità delle cose da fare sono
+i **Promemoria iOS**, non un database dell'app. Il telefono invia solo promemoria **aperti**
+delle liste che l'utente ha selezionato, quindi non esiste un campo `done` in ingresso:
+spuntare sul device significa che alla snapshot successiva la voce non c'è più.
+
+Item accettato come **array di 4 elementi** `[handle, listIndex, title, dueLabel]` o come
+oggetto `{h,l,t,d}`. Cap: 40 item nel pool, 4 liste, `title` 96 B, `dueLabel` 16 B, nome
+lista 24 B; lato telefono, massimo 20 item per lista.
+
+* `handle` — `uint16` 1..65535 (0 non valido). **Non** è un identificatore EventKit: quelli
+  sono lunghi e il cap del campo `id` è 64 B. La mappa maniglia→promemoria vive sul telefono.
+* `gen` — `uint16`, generazione della mappa, nuova a ogni refresh. Il device la conserva e la
+  rimanda in `reminder.toggle`; il telefono **rifiuta** un toggle con generazione stale e
+  risponde con una snapshot fresca. Senza questo, un toggle in volo durante un riordino
+  spunterebbe la voce sbagliata — lo stesso difetto che `workout.set` ha per indice.
+* `dueLabel` — formattata e **localizzata dal telefono** (≤16 caratteri, `""` se il
+  promemoria non ha data). Il firmware non interpreta date: le disegna.
 
 ```json
-{"schemaVersion":1,"type":"card","kind":"priorities.snapshot",
- "id":"priorities-sync-1755000000","title":"Priorities","body":"2 active / 1 done",
+{"schemaVersion":1,"type":"card","kind":"reminders.snapshot",
+ "id":"reminders-sync-1786717487","body":"3 da fare","gen":41,
  "part":0,"parts":1,
- "priorityItems":[["p1","Finish BLE spec","due today",false],
-                  ["p2","Call bank","",false],
-                  ["p3","Pay invoice","done at 9:12",true]]}
+ "reminderLists":[[0,"Oggi"],[1,"Casa"]],
+ "reminderItems":[[17,0,"Chiamare il commercialista","Oggi 09:00"],
+                  [18,0,"Rinnovare l'assicurazione","Scaduto"],
+                  [19,1,"Comprare lampadine",""]]}
 ```
 
-Multi-part: stessa `id`, `parts=2`, `part=0` con le prime 5 voci e `part=1` con le successive; il commit (e quindi il repaint) avviene solo con la fetta finale. Le fette devono arrivare **in ordine** e in numero ≤4 per tick di loop, altrimenti la FIFO ne perde (attrito 5).
+Multi-part: stessa `id`, gli item si distribuiscono sulle parti mentre `reminderLists`, `body`
+e `gen` viaggiano identici in ognuna; il commit (e quindi il repaint) avviene solo con la
+fetta finale. Le fette devono arrivare **in ordine** e in numero ≤4 per tick di loop,
+altrimenti la FIFO ne perde (attrito 5).
+
+Le liste selezionate diventano **schede** sul device, nell'ordine scelto nell'app. Il tetto di
+4 liste e 40 item non è arbitrario: ogni item costa ~120 B di RAM statica e il reader ha
+bisogno di un blocco heap contiguo da 32 KB che con BLE connesso ha ~36 KB di margine.
 
 ### 5.2 today.snapshot (agenda + banda meteo)
 
-Item: array a 5 `[kind, time, title, subtitle, state]` o oggetto con le stesse chiavi (`:889-908`). Cap: 6 item; `kind` 64, `time` 48, `title` 96, `subtitle` 48, `state` 64 (`state` viene salvato nella card ma **non copiato nello store**, `src/TodayStore.cpp:20-37`). `kind == "reminder"` seleziona la sezione Reminders, qualunque altro valore è agenda (`src/TodayStore.h:32`, `.cpp:45-54`).
+Item: array a 5 `[kind, time, title, subtitle, state]` o oggetto con le stesse chiavi
+(`:889-908`). Cap: 6 item; `kind` 64, `time` 48, `title` 96, `subtitle` 48, `state` 64
+(`state` viene salvato nella card ma **non copiato nello store**, `src/TodayStore.cpp:20-37`).
+
+Today è **solo agenda**: eventi del calendario nelle prossime 24 ore. Il valore
+`kind == "reminder"` non arriva più e non è più gestito — i promemoria hanno la loro card
+(§5.1), che è anche l'unico posto da cui si spuntano. Prima comparivano in entrambe le
+viste, ed era la duplicazione che la §5.1 elimina.
 
 ```json
 {"schemaVersion":1,"type":"card","kind":"today.snapshot","id":"today-sync-1755000000",
  "title":"Today","weather":"Partly cloudy","highLow":"H 24 / L 14","sync":"Synced 9:41 AM",
  "items":[["event","9:00 AM","Standup","Zoom",""],
-          ["event","11:30 AM","Dentist","Via Roma 4",""],
-          ["reminder","","Water plants","",""]]}
+          ["event","11:30 AM","Dentist","Via Roma 4",""]]}
 ```
 
 ### 5.3 workout.snapshot
@@ -173,8 +206,8 @@ Tutti hanno `schemaVersion: 1`; i comandi hanno `sequence` = contatore monotono 
 | `block.break` | `minutes` (5) | scelta “5 min break” | mettere in pausa e rispondere `state=break` | `:1072`, `src/scenes/BlockScene.cpp:240-246` |
 | `block.stop` | — | scelta “Stop now” | terminare il blocco, rispondere `state=ready` e aggiornare i contatori | `:1074` |
 | `block.status` | — | onEnter Block, resync al risveglio, fine countdown a 0 | rispondere con la card `block-status` corrente | `:1076`, `src/scenes/BlockScene.cpp:166-167`, `:300-301` |
-| `priorities.sync.request` | — | onEnter Priorities, soft-key Sync, resync al connect, pre-sleep | rispondere `priorities.snapshot` | `:1078`, `src/scenes/PrioritiesScene.cpp:129`, `src/Sleep.cpp:329` |
-| `priority.toggle` | `id`, `done` (bool) | CONFIRM su una voce | invertire lo stato del to-do e rispondere con una snapshot fresca | `:1084-1114`, `src/scenes/PrioritiesScene.cpp:157` |
+| `reminders.sync.request` | — | onEnter Promemoria, soft-key Sync, resync al connect, pre-sleep | rispondere `reminders.snapshot` | `src/scenes/RemindersScene.cpp`, `src/Sleep.cpp` |
+| `reminder.toggle` | `gen` (uint16), `handle` (uint16), `done` (bool, sempre true) | CONFIRM su una voce | verificare `gen`, scrivere `EKReminder.isCompleted = true`, salvare in EventKit e rispondere con una snapshot fresca. Con `gen` stale: **non** scrivere, rimandare solo la snapshot | `src/scenes/RemindersScene.cpp` |
 | `today.sync.request` | — | onEnter Today, resync, pre-sleep | rispondere `today.snapshot` | `:1080`, `src/scenes/TodayScene.cpp:156`, `src/Sleep.cpp:342` |
 | `workout.sync.request` | — | onEnter Workout, resync | rispondere `workout.snapshot` | `:1116`, `src/scenes/WorkoutScene.cpp:87` |
 | `workout.set` | `id`, `done` (int **assoluto**, non delta) | +/- su un esercizio (coalescato, inviato anche in `flushPendingSend` prima del sleep) | scrivere il conteggio assoluto; l'idempotenza è garantita dal valore assoluto | `:1120-1150`, `src/scenes/WorkoutScene.cpp:31-33` |
@@ -192,7 +225,7 @@ Il telefono **non** deve pushare snapshot spontanee: il device chiede, il telefo
 * Ogni scena card chiede i propri dati in `onEnter` (lazy, per-rail).
 * Sul fronte `isConnected()` false→true il main loop chiede **solo** i dati della scena a schermo (`CompanionSync::requestActive()`), con backstop di **3 ritentativi** ogni **2000 ms**, interrotto quando la revision dello store avanza o il link cade (`src/main.cpp:389-430`, `src/CompanionSync.cpp:51-69`).
 * Le scene senza rail (Notifications/Launcher/Settings/About) non generano richieste (`src/CompanionSync.cpp:22-30`).
-* Prima del deep sleep: `priorities.sync.request` e poi `today.sync.request`, ciascuno con attesa **fino a 3500 ms** con break anticipato (`src/Sleep.cpp:327-350`). I due comandi sono serializzati perché notify consecutive sulla stessa caratteristica si sovrascrivono.
+* Prima del deep sleep: `reminders.sync.request` e poi `today.sync.request`, ciascuno con attesa **fino a 3500 ms** con break anticipato (`src/Sleep.cpp:327-350`). I due comandi sono serializzati perché notify consecutive sulla stessa caratteristica si sovrascrivono.
 * Sync dot in status bar: attivo se una richiesta è armata, se restano ritentativi o se il backfill ANCS non è vuoto; “busy” se qualcosa è in trasmissione (`src/main.cpp:354-363`).
 
 ```mermaid
@@ -207,9 +240,9 @@ sequenceDiagram
     Dev->>iOS: GATT client: discover ANCS 7905F431
     Dev->>iOS: subscribe CCCD Data Source, poi Notification Source
     iOS->>Dev: write time.sync (day, minutesIntoDay)
-    Dev->>iOS: notify priorities.sync.request (scena attiva)
-    iOS->>Dev: write priorities.snapshot (part 0/2)
-    iOS->>Dev: write priorities.snapshot (part 1/2)
+    Dev->>iOS: notify reminders.sync.request (scena attiva)
+    iOS->>Dev: write reminders.snapshot (part 0/2)
+    iOS->>Dev: write reminders.snapshot (part 1/2)
     Dev->>Dev: commit store + repaint e-ink
 ```
 
@@ -276,19 +309,19 @@ Persistenza attraverso il sleep (`src/Sleep.cpp:69-80`, `:292-303`, `:471-493`):
 3. **Ordine di scoperta:** connect → bonding/cifratura avviati dal device → `discoverServices([6E400001…])` → `discoverCharacteristics` → `setNotifyValue(true)` su `6E400003` **prima** di scrivere. Le caratteristiche cifrate possono produrre `insufficientEncryption` finché il pairing non è completo: attendere il completamento e ritentare senza eliminare il bond.
 4. **Dimensione write:** tenere ogni card ≤ ~500 byte utili e spezzare con `part`/`parts`; usare `.withResponse`, attendere `didWriteValueFor` prima della fetta successiva e applicare un timeout/reconnect (Lume iOS usa 8 s).
 5. **Frequenza write:** max 4 write in volo (FIFO del firmware); il main loop gira a ~10 ms ma può essere occupato da un refresh e-ink. Spaziare le fette di almeno un intervallo di connessione (~180 ms) e non superare 4 write consecutive senza pausa.
-6. **UTF-8:** il clip lato firmware è **in byte** e non protegge i confini UTF-8 nelle card (a differenza di ANCS). Pre-troncare lato iOS ai cap della tabella §5 contando byte, ed evitare emoji nei campi card (il font non li disegna).
-7. **Handler obbligatori:** `priorities.sync.request`, `today.sync.request`, `workout.sync.request`, `block.status`, `priority.toggle`, `workout.set`, `block.start|break|stop`. Ignorare in modo innocuo i tipi ignoti (`card.action`, `transfer.status`, `reader.shelf`, `notif.apps`) se non si implementano quelle funzioni.
+6. **UTF-8:** dalla v0.4 il clip lato firmware avviene su **confine di codepoint** sia per le card sia per ANCS (`src/ble/Utf8Clip.h`), quindi un accento o una emoji sul limite non produce più mojibake. Restano comunque due ragioni per pre-troncare lato iOS: il testo tagliato dal device non lo scegli tu, e il font UI copre Latin-1 + Latin Ext-A, quindi le emoji non hanno glifo.
+7. **Handler obbligatori:** `reminders.sync.request`, `today.sync.request`, `workout.sync.request`, `block.status`, `reminder.toggle`, `workout.set`, `block.start|break|stop`. Ignorare in modo innocuo i tipi ignoti (`card.action`, `transfer.status`, `reader.shelf`, `notif.apps`) se non si implementano quelle funzioni.
 8. **Nessun ACK:** progettare la logica come idempotente e stateless per messaggio (`workout.set` è già assoluto). Rispondere sempre con una snapshot completa, non con delta.
 9. **Disconnessioni previste e legittime:** apertura del Reader (BLE spento e riavviato), File Transfer (BLE distrutto fino al reboot), deep sleep (nessun teardown, cade per supervision timeout). Non trattarle come errore né come unpairing.
-10. **Orologio:** inviare `time.sync` appena il canale è pronto, e ripeterlo su cambio giorno: il device non ha RTC e ogni wake è un power-on reset.
+10. **Orologio:** inviare `time.sync` appena il canale è pronto, e ripeterlo su cambio giorno. Dalla v0.4 il device ha un orologio hardware (DS3231) che semina l'ora al boot, ma il telefono resta l'autorità su fuso e ora legale: è `time.sync` che corregge il chip quando divergono di oltre un minuto.
 
 ## Cose da sistemare / attriti
 
 1. **[RISOLTO IN LUME v0.2] Card su link non cifrato.** Card Write dichiara `WRITE_ENC`; Action Read/Notify dichiara `READ_ENC` (`src/ble/CompanionBleService.cpp:226-240`). Resta da provare su hardware con un central non bonded.
 2. **Percorso “mail” morto.** `mailItems`/`mailSource`/`mailSync` sono parsati in `CompanionCardState` (8 × `CompanionMailItem`, 6 `std::string` ciascuno) ma nessun consumer li legge (`src/ble/CompanionBleService.cpp:910-931`; ricerca in `src/`: nessun altro riferimento). Costa allocazioni heap nello slot di parse da ~3,6 KB su un device con 320 KB. **Gravità: media.** Fix: eliminare struct, cap e blocco di parsing.
 3. **`actions[]` + `card.action` codice morto.** `sendAction()` non ha chiamanti (`:1031-1066`) e l'array `actions` esiste solo per lui (`:880-887`, `src/ble/CompanionProtocol.h:47-50`). **Gravità: bassa.** Fix: rimuovere entrambi, oppure agganciare le action alle soft-key se serve un canale generico.
-4. **`part`/`parts` onorati solo da Priorities.** `TodayStore::updateFromCard` e `WorkoutStore::updateFromCard` sovrascrivono lo stato a ogni fetta (`src/TodayStore.cpp:20-37`, `src/WorkoutStore.cpp:17-49`): una snapshot Today/Workout multi-part lascia sul vetro solo l'ultima fetta. **Gravità: media.** Fix: portare lo staging di `PrioritiesStore` in una utility condivisa, o rifiutare `parts > 1` per quei tipi.
-5. **La FIFO da 4 slot perde silenziosamente le fette di una snapshot multi-part.** A FIFO piena si scarta il payload più vecchio (`src/ble/CompanionBleService.cpp:690-695`) e `PrioritiesStore` continua a impilare da `_stageCount`, committando una lista sbagliata senza segnalare nulla (`src/PrioritiesStore.cpp:26-43`). **Gravità: media.** Fix: validare la continuità di `part` (contatore atteso) e invalidare lo staging se una fetta manca.
+4. **`part`/`parts` onorati solo dallo store dei promemoria.** `TodayStore::updateFromCard` e `WorkoutStore::updateFromCard` sovrascrivono lo stato a ogni fetta (`src/TodayStore.cpp:20-37`, `src/WorkoutStore.cpp:17-49`): una snapshot Today/Workout multi-part lascia sul vetro solo l'ultima fetta. **Gravità: media.** Fix: portare lo staging di `RemindersStore` in una utility condivisa, o rifiutare `parts > 1` per quei tipi.
+5. **La FIFO da 4 slot perde silenziosamente le fette di una snapshot multi-part.** A FIFO piena si scarta il payload più vecchio (`src/ble/CompanionBleService.cpp:690-695`) e lo store dei promemoria continua a impilare dal cursore di staging, committando una lista sbagliata senza segnalare nulla. **Gravità: media.** Fix: validare la continuità di `part` (contatore atteso) e invalidare lo staging se una fetta manca — la v0.5 lo fa nel nuovo `RemindersStore`, resta da fare per Today/Workout.
 6. **Nessun ACK/errore verso il telefono.** Payload rifiutato, JSON malformato e OOM del parser aggiornano solo una stringa locale (`:680-683`, `:766-771`, `:846-849`). L'app iOS non può distinguere “card applicata” da “card persa”. **Gravità: media.** Fix: notify `card.ack {id, part, ok, reason}` sulla Action characteristic.
 7. **Notify che si sovrascrivono.** Ogni `send*` fa `setValue` + `notify` senza coda né conferma; due comandi nello stesso tick si clobberano — problema noto e aggirato a mano serializzando le richieste pre-sleep (`src/Sleep.cpp:337-341`, `:1152-1178`). **Gravità: media.** Fix: piccola coda TX drenata su completamento notify.
 8. **[RISOLTO IN LUME v0.2] Resync ANCS sticky.** `requestResync()` arma `resyncPending`; `pumpResync()` parte da `processQueue()` quando ANCS/link cifrato sono pronti, serializza CCCD off→on e ri-arma la richiesta se la subscribe fallisce (`src/ble/CompanionAncsClient.cpp`).

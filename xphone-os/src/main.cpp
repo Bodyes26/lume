@@ -34,7 +34,7 @@
 #include "Gfx.h"
 #include "Input.h"
 #include "NotificationStore.h"
-#include "PrioritiesStore.h"
+#include "RemindersStore.h"
 #include "Scene.h"
 #include "LumeLocale.h"
 #include "TodayStore.h"
@@ -338,7 +338,7 @@ static uint8_t gResyncRetriesLeft = 0;
 static uint32_t activeSceneRailRevision() {
   switch (gCurrentSceneId) {
     case SceneId::Block:      return BLOCK_STATUS.revision();
-    case SceneId::Priorities: return PRIORITIES_STORE.revision();
+    case SceneId::Reminders:  return REMINDERS_STORE.revision();
     case SceneId::Today:      return TODAY_STORE.revision();
     case SceneId::Workout:    return WORKOUT_STORE.revision();
     default:                  return 0;  // no rail to wait on
@@ -347,7 +347,7 @@ static uint32_t activeSceneRailRevision() {
 static bool activeSceneHasRail() {
   switch (gCurrentSceneId) {
     case SceneId::Block:
-    case SceneId::Priorities:
+    case SceneId::Reminders:
     case SceneId::Today:
     case SceneId::Workout:    return true;
     default:                  return false;  // Notifications/Launcher/Settings/About
@@ -466,14 +466,18 @@ static void pumpCompanionEvents() {
     markBlockDirtyIfActive();
   }
 
-  // M3.2: the dedicated priorities store — the service fills it for every
-  // snapshot (even ones that land while another scene is on glass), so its
-  // own revision is what repaints the list rows.
-  static uint32_t lastPrioritiesRevision = 0;
-  const uint32_t prioritiesRevision = PRIORITIES_STORE.revision();
-  if (prioritiesRevision != lastPrioritiesRevision) {
-    lastPrioritiesRevision = prioritiesRevision;
-    markPrioritiesDirtyIfActive();
+  // Reminders — the service fills the dedicated store for every
+  // "reminders.snapshot" card (whichever scene is up); its own revision
+  // repaints the list rows. expirePending() reverts optimistic ticks whose
+  // timeout expired and marks the scene dirty if any row went back to open.
+  static uint32_t lastRemindersRevision = 0;
+  const uint32_t remindersRevision = REMINDERS_STORE.revision();
+  if (remindersRevision != lastRemindersRevision) {
+    lastRemindersRevision = remindersRevision;
+    markRemindersDirtyIfActive();
+  }
+  if (REMINDERS_STORE.expirePending(millis()) > 0) {
+    markRemindersDirtyIfActive();
   }
 
   // M3: the dedicated today store — same discipline as priorities above (the

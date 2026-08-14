@@ -22,7 +22,7 @@ namespace {
 // Settings. Icon bitmaps come from IconStyle (Settings → Icon style packs);
 // the XPhoneIconPacks columns in LauncherIcons.h share this order.
 constexpr const char* kApps[LauncherScene::APP_COUNT] = {
-    L10N("Today", "Oggi"), L10N("Notifications", "Notifiche"), L10N("Priorities", "Priorità"), L10N("Block", "Focus"), L10N("Read", "Leggi"), L10N("Workout", "Allenamento"),
+    L10N("Today", "Oggi"), L10N("Notifications", "Notifiche"), L10N("Reminders", "Promemoria"), L10N("Block", "Focus"), L10N("Read", "Leggi"), L10N("Workout", "Allenamento"),
 };
 
 // 1bpp blitter for the ported artwork (format per LauncherIcons.h header;
@@ -129,8 +129,8 @@ void LauncherScene::handleInput(Input& in) {
     const char* app = kApps[_sel];
     if (strcmp(app, L10N("Block", "Focus")) == 0) {
       showBlock();
-    } else if (strcmp(app, L10N("Priorities", "Priorità")) == 0) {
-      showPriorities();
+    } else if (strcmp(app, L10N("Reminders", "Promemoria")) == 0) {
+      showReminders();
     } else if (strcmp(app, L10N("Today", "Oggi")) == 0) {
       showToday();
     } else if (strcmp(app, L10N("Notifications", "Notifiche")) == 0) {

@@ -26,7 +26,7 @@
 #include "../Ds3231.h"
 #include "../NotificationFilter.h"
 #include "../LumeLocale.h"
-#include "../PrioritiesStore.h"
+#include "../RemindersStore.h"
 #include "../WorkoutStore.h"
 #include "../TodayStore.h"
 #include "../net/WifiCreds.h"
@@ -995,29 +995,41 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     }
   }
 
-  // M3 Priorities — the iOS PrioritiesManager sends priorityItems as
-  // 4-element arrays [id, title, note, done] (PrioritiesManager.swift:
-  // 124-146); the object form is accepted too, mirroring the x4-os parser
-  // (x4-os CompanionBleService.cpp:479-496).
-  JsonArray priorityItems = doc["priorityItems"].as<JsonArray>();
-  for (JsonVariant item : priorityItems) {
-    if (next->priorityItemCount >= CompanionProtocol::MAX_PRIORITY_ITEMS) break;
-    auto& target = next->priorityItems[next->priorityItemCount++];
-    if (item.is<JsonArray>()) {
-      JsonArray fields = item.as<JsonArray>();
-      target.id = clipUtf8(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.title = clipUtf8(fields[1] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.note = clipUtf8(fields[2] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
-      target.done = fields[3] | false;
-    } else if (item.is<JsonObject>()) {
-      JsonObject fields = item.as<JsonObject>();
-      target.id = clipUtf8(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.title = clipUtf8(fields["title"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.note = clipUtf8(fields["note"] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
-      target.done = fields["done"] | false;
+  // Reminders — the iOS RemindersStore sends reminderItems as 4-element arrays
+  // [handle, listIndex, title, dueLabel]; object form accepted with keys h/l/t/d.
+  next->reminderGeneration = static_cast<uint16_t>(doc["gen"] | 0);
+  JsonArray reminderLists = doc["reminderLists"].as<JsonArray>();
+  for (JsonVariant entry : reminderLists) {
+    if (entry.is<JsonArray>()) {
+      JsonArray row = entry.as<JsonArray>();
+      const int idx = row[0] | -1;
+      if (idx >= 0 && idx < static_cast<int>(CompanionProtocol::MAX_REMINDER_LISTS)) {
+        next->reminderListNames[idx] = clipUtf8(row[1] | "", CompanionProtocol::MAX_REMINDER_LIST_NAME_CHARS);
+        if (static_cast<std::size_t>(idx + 1) > next->reminderListCount) {
+          next->reminderListCount = idx + 1;
+        }
+      }
     }
   }
 
+  JsonArray reminderItems = doc["reminderItems"].as<JsonArray>();
+  for (JsonVariant item : reminderItems) {
+    if (next->reminderItemCount >= CompanionProtocol::MAX_REMINDER_ITEMS) break;
+    auto& target = next->reminderItems[next->reminderItemCount++];
+    if (item.is<JsonArray>()) {
+      JsonArray fields = item.as<JsonArray>();
+      target.handle = static_cast<uint16_t>(fields[0] | 0);
+      target.list = static_cast<uint8_t>(fields[1] | 0);
+      target.title = clipUtf8(fields[2] | "", CompanionProtocol::MAX_REMINDER_TITLE_CHARS);
+      target.due = clipUtf8(fields[3] | "", CompanionProtocol::MAX_REMINDER_DUE_CHARS);
+    } else if (item.is<JsonObject>()) {
+      JsonObject fields = item.as<JsonObject>();
+      target.handle = static_cast<uint16_t>(fields["h"] | fields["handle"] | 0);
+      target.list = static_cast<uint8_t>(fields["l"] | fields["list"] | 0);
+      target.title = clipUtf8(fields["t"] | fields["title"] | "", CompanionProtocol::MAX_REMINDER_TITLE_CHARS);
+      target.due = clipUtf8(fields["d"] | fields["due"] | "", CompanionProtocol::MAX_REMINDER_DUE_CHARS);
+    }
+  }
   // Workout — WorkoutManager.swift sends workoutItems as 4-element arrays
   // [id, name, sets, done]; object form accepted for forward compat.
   JsonArray workoutItems = doc["workoutItems"].as<JsonArray>();
@@ -1046,8 +1058,8 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   // the Priorities scene has ever been on glass — the sleep frame reads the
   // store, not the card. Safe without the mutex: applyCardPayload runs only
   // on the main loop (processPending marshalling), the store's only task.
-  if (next->kind == "priorities.snapshot" || next->id.find("priorities-sync-") == 0 || next->priorityItemCount > 0) {
-    PRIORITIES_STORE.updateFromCard(*next);
+  if (next->kind == "reminders.snapshot" || next->id.find("reminders-sync-") == 0 || next->reminderItemCount > 0) {
+    REMINDERS_STORE.updateFromCard(*next);
   }
 
   // M3 Today — service-level capture, predicate identical to x4-os
@@ -1084,11 +1096,11 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   ++revision;
   xSemaphoreGive(stateMutex);
 
-  LOG_INF("X4CMP", "Card received id=%s source=%s titleBytes=%u bodyBytes=%u actions=%u today=%u mail=%u prio=%u",
+  LOG_INF("X4CMP", "Card received id=%s source=%s titleBytes=%u bodyBytes=%u actions=%u today=%u mail=%u rem=%u",
           next->id.c_str(), next->source.c_str(), static_cast<unsigned>(next->title.size()),
           static_cast<unsigned>(next->body.size()), static_cast<unsigned>(next->actionCount),
           static_cast<unsigned>(next->todayItemCount), static_cast<unsigned>(next->mailItemCount),
-          static_cast<unsigned>(next->priorityItemCount));
+          static_cast<unsigned>(next->reminderItemCount));
   delete next;
   return true;
 }
@@ -1140,14 +1152,12 @@ bool CompanionBleService::sendBlockStop() { return sendBlockCommand("block.stop"
 
 bool CompanionBleService::sendBlockStatus() { return sendBlockCommand("block.status", 0); }
 
-bool CompanionBleService::sendPrioritiesSyncRequest() { return sendCommand("priorities.sync.request"); }
+bool CompanionBleService::sendRemindersSyncRequest() { return sendCommand("reminders.sync.request"); }
 
 bool CompanionBleService::sendTodaySyncRequest() { return sendCommand("today.sync.request"); }
 
-// Same shape as sendBlockCommand, with the priority.toggle fields the iOS
-// side reads (PrioritiesManager.swift handleActionPayload: "id" + "done").
-bool CompanionBleService::sendPriorityToggle(const char* itemId, const bool done) {
-  if (!itemId || itemId[0] == '\0') return false;
+bool CompanionBleService::sendReminderToggle(const uint16_t handle, const uint16_t gen, const bool done) {
+  if (handle == 0) return false;
 
   bool shouldNotify = false;
   uint32_t sequence = 0;
@@ -1155,7 +1165,7 @@ bool CompanionBleService::sendPriorityToggle(const char* itemId, const bool done
   ensureMutex();
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   sequence = ++actionSequence;
-  statusMessage = connected && actionCharacteristic ? "Priority update sent" : L10N("Companion unavailable", "Lume non disponibile");
+  statusMessage = connected && actionCharacteristic ? L10N("Reminder update sent", "Aggiornamento promemoria inviato") : L10N("Companion unavailable", "Lume non disponibile");
   shouldNotify = connected && actionCharacteristic;
   ++revision;
   xSemaphoreGive(stateMutex);
@@ -1164,8 +1174,9 @@ bool CompanionBleService::sendPriorityToggle(const char* itemId, const bool done
 
   JsonDocument doc;
   doc["schemaVersion"] = 1;
-  doc["type"] = "priority.toggle";
-  doc["id"] = itemId;
+  doc["type"] = "reminder.toggle";
+  doc["gen"] = gen;
+  doc["handle"] = handle;
   doc["done"] = done;
   doc["sequence"] = sequence;
 
@@ -1173,7 +1184,8 @@ bool CompanionBleService::sendPriorityToggle(const char* itemId, const bool done
   serializeJson(doc, json);
   actionCharacteristic->setValue(json);
   actionCharacteristic->notify();
-  LOG_INF("X4CMP", "Priority toggle sent id=%s done=%d sequence=%lu", itemId, done ? 1 : 0,
+  LOG_INF("X4CMP", "Reminder toggle sent handle=%u gen=%u done=%d sequence=%lu",
+          static_cast<unsigned>(handle), static_cast<unsigned>(gen), done ? 1 : 0,
           static_cast<unsigned long>(sequence));
   return true;
 }

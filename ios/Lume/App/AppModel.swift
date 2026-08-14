@@ -3,17 +3,17 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
-    let priorities: PrioritiesStore
+    let reminders: RemindersStore
     let today: TodayStore
     let bluetooth: LumeBluetoothManager
 
     init(defaults: UserDefaults = .standard) {
-        let priorities = PrioritiesStore(defaults: defaults)
+        let reminders = RemindersStore(defaults: defaults)
         let today = TodayStore()
-        self.priorities = priorities
+        self.reminders = reminders
         self.today = today
         bluetooth = LumeBluetoothManager(
-            priorities: priorities,
+            reminders: reminders,
             today: today,
             defaults: defaults
         )

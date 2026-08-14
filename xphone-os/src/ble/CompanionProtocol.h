@@ -27,7 +27,13 @@ constexpr const char* ACTION_NOTIFY_UUID = "F626E419-C6A8-4048-B684-98C4604D19A3
 constexpr std::size_t MAX_ACTIONS = 4;
 constexpr std::size_t MAX_TODAY_ITEMS = 6;
 constexpr std::size_t MAX_MAIL_ITEMS = 8;
-constexpr std::size_t MAX_PRIORITY_ITEMS = 10;
+// Lume reminders — the iOS Reminders lists selected in the app become the
+// device's tabs, so the caps are device-shaped, not phone-shaped: 4 lists, a
+// 40-item pool across them (the phone cuts each list at 20 and says so in the
+// card body). Sizes are mirrored by RemindersStore's static_asserts and by
+// LumeProtocol.swift.
+constexpr std::size_t MAX_REMINDER_LISTS = 4;
+constexpr std::size_t MAX_REMINDER_ITEMS = 40;
 constexpr std::size_t MAX_WORKOUT_ITEMS = 8;
 constexpr std::size_t MAX_WORKOUT_NAME_CHARS = 48;
 constexpr std::size_t MAX_CARD_BYTES = 4096;
@@ -38,7 +44,9 @@ constexpr std::size_t MAX_BODY_CHARS = 512;
 constexpr std::size_t MAX_ACTION_LABEL_CHARS = 32;
 constexpr std::size_t MAX_TODAY_FIELD_CHARS = 48;
 constexpr std::size_t MAX_MAIL_FIELD_CHARS = 96;
-constexpr std::size_t MAX_PRIORITY_FIELD_CHARS = 120;
+constexpr std::size_t MAX_REMINDER_TITLE_CHARS = 96;
+constexpr std::size_t MAX_REMINDER_DUE_CHARS = 16;
+constexpr std::size_t MAX_REMINDER_LIST_NAME_CHARS = 24;
 }  // namespace CompanionProtocol
 
 struct CompanionCardAction {
@@ -54,14 +62,18 @@ struct CompanionTodayItem {
   std::string state;
 };
 
-// M3 Priorities — one to-do from the iOS "priorities.snapshot" card
-// (PrioritiesManager.swift:124-146 sends priorityItems as 4-element arrays
-// [id, title, note, done]; struct mirrors x4-os CompanionProtocol.h:54-59).
-struct CompanionPriorityItem {
-  std::string id;
+// Lume reminders — one OPEN reminder from the iOS "reminders.snapshot" card
+// (reminderItems as 4-element arrays [handle, listIndex, title, dueLabel]).
+// `handle` is the phone's uint16 alias for the EKReminder, valid from 1, and
+// the only thing reminder.toggle sends back; `due` is already formatted and
+// localized by the phone, so the device never parses a date. There is no
+// `done`: the phone sends open reminders only, and a ticked one is simply
+// absent from the next snapshot.
+struct CompanionReminderItem {
+  uint16_t handle = 0;
+  uint8_t list = 0;
   std::string title;
-  std::string note;
-  bool done = false;
+  std::string due;
 };
 
 // Workout — one exercise from the iOS "workout.snapshot" card
@@ -117,8 +129,16 @@ struct CompanionCardState {
   std::size_t todayItemCount = 0;
   std::array<CompanionMailItem, CompanionProtocol::MAX_MAIL_ITEMS> mailItems;
   std::size_t mailItemCount = 0;
-  std::array<CompanionPriorityItem, CompanionProtocol::MAX_PRIORITY_ITEMS> priorityItems;
-  std::size_t priorityItemCount = 0;
+  std::array<CompanionReminderItem, CompanionProtocol::MAX_REMINDER_ITEMS> reminderItems;
+  std::size_t reminderItemCount = 0;
+  // List names indexed BY listIndex (what CompanionReminderItem::list points
+  // at), so a sparse "reminderLists" never shifts an item onto the wrong tab.
+  std::array<std::string, CompanionProtocol::MAX_REMINDER_LISTS> reminderListNames;
+  std::size_t reminderListCount = 0;
+  // Generation of the phone's handle->reminder map, echoed in every
+  // reminder.toggle so a toggle built from a stale handle set is rejected
+  // instead of ticking the wrong reminder.
+  uint16_t reminderGeneration = 0;
   // Multi-part snapshot cards: a single GATT write caps a card at ~512 bytes,
   // so iOS splits large priorities snapshots into `parts` cards sharing one
   // card id, each carrying `part` (0-based) and a slice of the items. Older
