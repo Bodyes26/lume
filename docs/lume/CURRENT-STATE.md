@@ -24,7 +24,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Localizzazione firmware | **VERIFICATA SU HARDWARE** | `lume-x3-it` caricato via USB sull'X3; boot, launcher, Impostazioni, una scena applicativa, soft-key e glifi accentati confermati corretti dall'utente; `lume-x3-en` verificato a build e isolamento binario |
 | Boot e resa sul vetro pre-i18n | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo prima della localizzazione |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
-| App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
+| App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; nuova versione con integrazione Promemoria nativi installata e avviata su device |
 | Orologio hardware DS3231 | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 19:22:12`, OSF a 0, secondo boot un minuto dopo, ora coincidente col `time.sync`. Maurizio ha poi confermato vetro e tampone VBAT |
 | Promemoria iOS (sostituisce Priorities) | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 21:43:12`, `time.sync min=1303` (21:43), BLE link cifrato/bonded, ANCS attivo, loop e refresh stabili |
 
