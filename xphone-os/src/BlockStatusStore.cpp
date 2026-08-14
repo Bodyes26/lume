@@ -1,9 +1,9 @@
 #include "BlockStatusStore.h"
 
-#include <cstdio>
 #include <string>
 
 #include "ble/CompanionProtocol.h"
+#include "ble/Utf8Clip.h"
 
 BlockStatusStore BLOCK_STATUS;
 
@@ -46,9 +46,12 @@ void BlockStatusStore::updateFromCard(const CompanionCardState& card) {
   _status.ready = (card.state == "ready");
   _status.remainingMinutes = remaining;
   _status.durationMinutes = card.durationMinutes;
-  // snprintf clips + always null-terminates (strncpy does not).
-  snprintf(_status.preset, sizeof(_status.preset), "%s", card.preset.c_str());
-  snprintf(_status.endsAtLabel, sizeof(_status.endsAtLabel), "%s", card.endsAtLabel.c_str());
+  // Card fields arrive clipped to the protocol caps (preset 96 B, endsAtLabel
+  // 48 B) but these slots are 24 B / 16 B, so the copy is where a real cut
+  // happens: clipUtf8 keeps it on a codepoint boundary (see ble/Utf8Clip.h)
+  // instead of leaving a half sequence for the glass. Always NUL-terminates.
+  clipUtf8(_status.preset, sizeof(_status.preset), card.preset.c_str());
+  clipUtf8(_status.endsAtLabel, sizeof(_status.endsAtLabel), card.endsAtLabel.c_str());
   _status.blocksToday = card.blocksToday;
   _status.streak = card.blockStreak;
   _status.total = card.blocksTotal;
@@ -72,7 +75,7 @@ void BlockStatusStore::seedFromPersisted(bool active, bool onBreak, int remainin
   _status.ready = false;
   _status.remainingMinutes = remainingMinutes;
   _status.durationMinutes = durationMinutes;
-  snprintf(_status.preset, sizeof(_status.preset), "%s", preset ? preset : "");
-  snprintf(_status.endsAtLabel, sizeof(_status.endsAtLabel), "%s", endsAtLabel ? endsAtLabel : "");
+  clipUtf8(_status.preset, sizeof(_status.preset), preset);
+  clipUtf8(_status.endsAtLabel, sizeof(_status.endsAtLabel), endsAtLabel);
   _status.revision++;
 }

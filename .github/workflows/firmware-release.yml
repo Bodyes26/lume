@@ -27,12 +27,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Cache PlatformIO
+      # Only the toolchain/library download cache (~/.platformio) is reused.
+      # xphone-os/.pio/build MUST NOT be cached: the key hashes platformio.ini
+      # only, so it never changes when sources do and a release would ship
+      # object files from an arbitrary earlier commit
+      # (docs/lume/09-cose-da-sistemare.md, voce 4). A from-scratch compile
+      # costs a few minutes; a wrong firmware.bin costs trust.
+      - name: Cache PlatformIO toolchain and libraries
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.platformio
-            xphone-os/.pio/build
+          path: ~/.platformio
           key: ${{ runner.os }}-platformio-${{ hashFiles('xphone-os/platformio.ini') }}
 
       - name: Install PlatformIO 6.1.19
@@ -56,8 +60,19 @@ jobs:
       - name: Run host tests
         run: cd xphone-os && sh test/host/run.sh
 
+      # The firmware must report the released tag, not the source default in
+      # src/scenes/AppScenes.h (docs/lume/09-cose-da-sistemare.md, voce 5).
+      # PLATFORMIO_BUILD_FLAGS is appended to each env's build_flags, and the
+      # flag needs three layers of quoting: the outer shell quotes build the
+      # variable, the single quotes survive into the flag string and are eaten
+      # by PlatformIO's shell-style flag parser, and the inner \" pair is what
+      # reaches the compiler, so XPHONE_VERSION expands to a C string literal:
+      #   -DXPHONE_VERSION='"1.2.3"'  ->  -DXPHONE_VERSION=\"1.2.3\"
       - name: Build Italian and English Lume for X3
-        run: cd xphone-os && pio run -e lume-x3-it -e lume-x3-en
+        run: |
+          cd xphone-os
+          PLATFORMIO_BUILD_FLAGS="-DXPHONE_VERSION='\"${VERSION}\"'" \
+            pio run -e lume-x3-it -e lume-x3-en
 
       - name: Stage release assets
         run: |

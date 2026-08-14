@@ -169,6 +169,12 @@ void BlockScene::onEnter() {
     _localMsg = L10N("Connect Companion to sync.", "Collega Lume per sincronizzare.");
   }
   _zeroConfirmSent = false;
+  // The +/- override (adjustDuration, line 195) lasts for THIS visit only: it
+  // gates the phone's durationMinutes at line 663, so leaving it latched made
+  // one tap freeze the duration for the rest of the boot and the card's value
+  // was never applied again. Entering the app is a fresh start — the phone is
+  // authoritative until the user touches the -/+ edge tabs again.
+  _durationCustomized = false;
 }
 
 const char* const* BlockScene::softKeys() const {

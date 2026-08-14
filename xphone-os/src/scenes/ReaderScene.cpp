@@ -326,6 +326,7 @@ void ReaderScene::failWith(const char* msg) {
   _errorMsg = msg;
   _state = State::Error;
   _work = Work::None;
+  _turnAwaitsIndex = false;  // the chapter never reached glass: don't count that turn later
   markDirty();
 }
 
@@ -388,6 +389,10 @@ void ReaderScene::workBuildSection() {
   applyPendingPage();
   _state = State::Reading;
   reader::ReadingStats::sessionStart(_bookPath);
+  if (_turnAwaitsIndex) {
+    _turnAwaitsIndex = false;
+    reader::ReadingStats::pageTurn();  // the chapter roll that armed this build is now on glass
+  }
   markDirty();
 }
 
@@ -612,29 +617,46 @@ void ReaderScene::handleInput(Input& in) {
   }
 }
 
+// Invariant: ReadingStats counts a page ONLY when the page on glass actually
+// changes. Pressing forward on the last page of the last chapter (or back on
+// the very first page) is a no-op and must not inflate pages/streak, and a
+// chapter roll counts exactly once — here when the section cache loads
+// straight into Reading, or in workBuildSection() when it first has to be
+// built (nothing at all if that load fails and we end in Error).
 void ReaderScene::pageTurn(const bool forward) {
   if (!_epub || !_section) return;
-  reader::ReadingStats::pageTurn();
+  bool sectionRoll = false;
   if (forward) {
     if (_section->currentPage + 1 < static_cast<int>(_section->pageCount)) {
       _section->currentPage++;
+      reader::ReadingStats::pageTurn();
       markDirty();  // full-panel: the flush worker + FAST/HALF cadence handle the rest
     } else if (_spine + 1 < _epub->getSpineItemsCount()) {
       _spine++;
       _nextPage = 0;
-      ensureSectionOrIndex();
+      sectionRoll = true;
     }
-    // else: final page of the book — stay put.
+    // else: final page of the book — stay put, nothing counted.
   } else {
     if (_section->currentPage > 0) {
       _section->currentPage--;
+      reader::ReadingStats::pageTurn();
       markDirty();
     } else if (_spine > 0) {
       _spine--;
       _nextPage = kLastPageSentinel;  // land on the previous chapter's LAST page
-      ensureSectionOrIndex();
+      sectionRoll = true;
     }
+    // else: first page of the book — stay put, nothing counted.
   }
+  if (!sectionRoll) return;
+  ensureSectionOrIndex();
+  if (_state == State::Reading) {
+    reader::ReadingStats::pageTurn();  // cache hit: the new chapter's page is the one being shown
+  } else if (_state == State::Indexing) {
+    _turnAwaitsIndex = true;  // counted by workBuildSection() once the chapter lands
+  }
+  // State::Error (OOM in ensureSectionOrIndex): no new page, no count.
 }
 
 // CONFIRM in Reading: cycle 12 -> 14 -> 16 -> 12 pt. fontId is part of the
@@ -772,6 +794,7 @@ void ReaderScene::openSelectedBook() {
   _hasPendingRatio = false;
   _prefetchAttemptedSpine = -1;
   _pageLoadRetries = 0;
+  _turnAwaitsIndex = false;  // this first chapter build is an open, not a page turn
   _state = State::Opening;
   _work = Work::OpenBook;  // replaces any pending GridMeta — opens never wait on thumbs
   _workArmed = false;

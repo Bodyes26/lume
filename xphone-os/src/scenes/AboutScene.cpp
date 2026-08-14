@@ -18,20 +18,70 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 
+void AboutScene::onEnter() {
+  // Re-entering About always lands on page 1: the identity page is what
+  // "Informazioni su Lume" means, page 2 is a deliberate step further in.
+  _page = 0;
+}
+
 void AboutScene::handleInput(Input& in) {
   if (in.wasPressed(Btn::Back)) showLauncher();
+  // Same PREV/NEXT pair as SettingsScene's icon picker
+  // (SettingsScene.cpp:219-220): the front Left/Right buttons sit under the
+  // PREC/SUCC tabs, the top-edge Up/Down mirror them. Clamped, no wrap.
+  if (in.wasPressed(Btn::Up) || in.wasPressed(Btn::Left)) {
+    if (_page > 0) {
+      _page--;
+      markDirty();
+    }
+  }
+  if (in.wasPressed(Btn::Down) || in.wasPressed(Btn::Right)) {
+    if (_page + 1 < kPageCount) {
+      _page++;
+      markDirty();
+    }
+  }
+}
+
+const char* const* AboutScene::softKeys() const {
+  // Slot 1 (CONFIRM) stays empty: About has nothing to open or act on.
+  static constexpr const char* kKeys[4] = {L10N("BACK", "INDIETRO"), nullptr, L10N("PREV", "PREC"),
+                                           L10N("NEXT", "SUCC")};
+  return kKeys;
 }
 
 void AboutScene::render(Gfx& gfx) {
-  // Values are sampled here, once per entry — the scene renders only when
-  // dirty, so this is a snapshot, not a live monitor (e-ink discipline).
-  char line[96];
   const int x = 24;
   int y = 16;
 
   gfx.drawText(kFontBold, x, y, L10N("About Lume", "Informazioni su Lume"));
+  // Page counter, right-aligned on the title's own baseline: kFontSmall's
+  // ascender is 20 against the 12pt pair's 24 (Fonts.cpp:26/46), so it drops
+  // 4px. Chrome, not content — hence the small font.
+  char tag[8];
+  snprintf(tag, sizeof(tag), "%u/%u", static_cast<unsigned>(_page + 1), static_cast<unsigned>(kPageCount));
+  gfx.drawText(kFontSmall, gfx.width() - x - gfx.textWidth(kFontSmall, tag),
+               y + kFontBold.ascender - kFontSmall.ascender, tag);
   y += gfx.lineHeight(kFontBold) + 10;
   gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
+
+  // Paged because one page no longer fits the glass: 24 rows at lineHeight+4
+  // (29+4 = 33px, plus 6px per rule) from y=16 put the last three tops at
+  // 733/766/799 — over the soft-key bar (height() - SOFTKEY_BAR_H = 748,
+  // Scene.h:22) and, for the closing power hint, past the 792px panel
+  // altogether. The cut follows the rules the layout already drew: page 1
+  // ends at y=424 (+29 = 453), page 2 at y=391 (+29 = 420).
+  if (_page == 0) {
+    renderIdentity(gfx, x, y);
+  } else {
+    renderDiagnostics(gfx, x, y);
+  }
+}
+
+void AboutScene::renderIdentity(Gfx& gfx, int x, int y) {
+  // Values are sampled here, once per entry — the scene renders only when
+  // dirty, so this is a snapshot, not a live monitor (e-ink discipline).
+  char line[96];
 
   snprintf(line, sizeof(line), L10N("version: %s (built %s %s)", "versione: %s (creata %s %s)"), XPHONE_VERSION, __DATE__, __TIME__);
   gfx.drawText(kFontRegular, x, y, line);
@@ -135,12 +185,16 @@ void AboutScene::render(Gfx& gfx) {
   snprintf(line, sizeof(line), L10N("partials since scrub: %u  (HALF every %u)", "parziali dal reset: %u  (HALF ogni %u)"),
            static_cast<unsigned>(gRefreshStats.sinceScrub), static_cast<unsigned>(kScrubAfterRefreshes));
   gfx.drawText(kFontRegular, x, y, line);
-  y += gfx.lineHeight(kFontRegular) + 10;
+}
+
+void AboutScene::renderDiagnostics(Gfx& gfx, int x, int y) {
+  char line[96];
 
   // --- M2.1b: power instrumentation — About IS the meter readout for the
   // power levers (uptime + gauge average current = drain per configuration;
-  // adv mode + conn interval = what the radio is actually doing). -----------
-  gfx.fillRect(x, y - 6, gfx.width() - 2 * x, 2, true);
+  // adv mode + conn interval = what the radio is actually doing). The rule
+  // that used to open this block is now the title rule of page 2, drawn by
+  // render() at the same y — no second fillRect. --------------------------
 
   snprintf(line, sizeof(line), L10N("cpu: %lu MHz  uptime: %lu min", "cpu: %lu MHz  attivo: %lu min"),
            static_cast<unsigned long>(getCpuFrequencyMhz()), static_cast<unsigned long>(millis() / 60000UL));

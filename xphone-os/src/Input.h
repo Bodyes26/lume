@@ -61,10 +61,19 @@ class Input {
   }
 
   // Stop sampling before deep sleep / restart so the task isn't mid-ADC-read
-  // during teardown. (Wake from X3 sleep is a full power-on reset, so there
-  // is no resume path — suspend is enough.)
+  // during teardown. (Wake from X3 sleep is a full power-on reset, so those
+  // paths need no resume — suspend is enough.)
   void suspendTask() {
     if (_task) vTaskSuspend(_task);
+  }
+
+  // Counterpart for the one suspend that CAN come back: a failed SD firmware
+  // flash (SettingsScene::doFlash) returns to the picker instead of rebooting,
+  // and without this the device would stay deaf to every button. Safe after an
+  // idle suspend too: vTaskResume on a running task is a no-op, and the tap
+  // machine resumes from the real pin levels on the next 5ms sample.
+  void resumeTask() {
+    if (_task) vTaskResume(_task);
   }
 
   // Main-loop tick: drain events latched by the sampling task into this

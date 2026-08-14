@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "ble/CompanionProtocol.h"
+#include "ble/Utf8Clip.h"
 
 PrioritiesStore PRIORITIES_STORE;
 
@@ -38,7 +39,11 @@ void PrioritiesStore::updateFromCard(const CompanionCardState& card) {
   // on glass; the next sync repairs it.
   if (card.part + 1 >= card.parts) {
     _count = _stageCount;
-    snprintf(_syncLine, sizeof(_syncLine), "%s", card.body.c_str());
+    // The card body carries up to MAX_BODY_CHARS (512 B) but the sync line
+    // slot is 97 B, so this copy is a real cut: clip on a codepoint boundary
+    // (ble/Utf8Clip.h) so an accented "Sincronizzato ..." never renders half a
+    // sequence. Always NUL-terminates.
+    clipUtf8(_syncLine, sizeof(_syncLine), card.body.c_str());
     _revision++;
   }
 }

@@ -170,8 +170,20 @@ void SettingsScene::scanBinFiles() {
   Serial.printf("[xphone-os] settings: %d firmware image(s) on SD root\n", _fileCount);
 }
 
-void SettingsScene::doFlash() {
+void SettingsScene::doFlash(Input& in) {
   if (_gfx == nullptr || _pickSel >= _fileCount) return;  // cannot happen: confirm was rendered via _gfx
+  // Scene.h:123-124 contract. Everything below drives the panel directly
+  // (progress bar, error X) and reads the SD card, and both hang off the SAME
+  // SPI bus (SdUpdate.cpp:546-549). A flush handed to the worker task is still
+  // shifting a frame out on that bus for up to ~3.2s (Scene.h:136), so starting
+  // the OTA now would put two tasks on one SPI bus during a partition write:
+  // the failure mode is a half-written image on a device that no longer boots.
+  // Same pair, same order, as the other direct-panel paths (Sleep.cpp:217-218,
+  // main.cpp:555-556): drain the worker, then stop the 5ms sampling task so it
+  // stops preempting the (synchronous, multi-second) write loop and stops
+  // latching taps nobody will drain until the flash is over.
+  SCENES.waitFlushIdle();
+  in.suspendTask();
   char path[MAX_NAME_LEN + 2];
   snprintf(path, sizeof(path), "/%s", _files[_pickSel].name);
   Serial.printf("[xphone-os] settings: flashing %s\n", path);
@@ -179,6 +191,10 @@ void SettingsScene::doFlash() {
   // + esp_restart() — the same proven machinery as the boot-time /update.bin
   // path (SdUpdate). Returns only on failure (error X already drawn).
   sd_update::flashFromPath(_gfx->display(), path);
+  // Failure only: on success flashFromPath restarts and never returns, so the
+  // suspend above dies with the reboot. Here the scene stays on glass, so
+  // sampling must come back or the device is deaf to every button.
+  in.resumeTask();
   _status = L10N("Update failed - image left untouched", "Aggiornamento non riuscito - file intatto");
   _view = View::Picker;
   markDirty();  // repaint over the error X (panel RAM diff handles the rest)
@@ -240,7 +256,7 @@ void SettingsScene::handleInput(Input& in) {
         _view = View::Picker;
         markDirty();
       } else if (in.wasPressed(Btn::Confirm)) {  // YES
-        doFlash();  // restarts on success; on failure falls back to the picker
+        doFlash(in);  // restarts on success; on failure falls back to the picker
       }
       break;
 
@@ -327,7 +343,13 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
   const int gridX = (gfx.width() - gridW) / 2;
   const int gridY = kHeaderH + 10 + 2 * gfx.lineHeight(kFontBold) + 20;
 
-  static constexpr const char* kLabels[6] = {L10N("Notif", "Notif"), L10N("Read", "Leggi"), L10N("Today", "Oggi"), L10N("Priorities", "Priorità"), L10N("Block", "Focus"), L10N("Workout", "Allenamento")};
+  // MUST track the icon-pack COLUMN order, since the loop below pairs
+  // kLabels[i] with IconStyle::iconForApp(i) -> XPhoneIconPacks[pack][i]:
+  // Today, Notifications, Priorities, Block, Read, Workout (LauncherIcons.h:2272-2273,
+  // the launcher's own kApps in LauncherScene.cpp:24-26). The stale prose at
+  // LauncherIcons.h:6-7 lists a different order — the table is what indexes.
+  static constexpr const char* kLabels[6] = {L10N("Today", "Oggi"),  L10N("Notif", "Notif"), L10N("Priorities", "Priorità"),
+                                             L10N("Block", "Focus"), L10N("Read", "Leggi"),  L10N("Workout", "Allenamento")};
 
   // Downscale 104 -> 72 by nearest-neighbor sampling into a stack buffer of
   // one destination row, then draw. Keeps the preview cheap (no heap).

@@ -219,9 +219,13 @@ void WorkoutScene::render(Gfx& gfx) {
   gfx.drawText(kFontRegular, w - kMarginX - gfx.textWidth(kFontRegular, progress), subY, progress);
 
   const int syncY = subY + gfx.lineHeight(kFontBold) + 2;
-  // Transients win; otherwise the set-counting instruction (the edge buttons
-  // are not discoverable without it).
-  const char* syncLine = _localMsg[0] ? _localMsg : L10N("Press left (-) and right (+) to count sets.", "Usa sinistra (-) e destra (+) per le serie.");
+  // Transients win; otherwise the set-counting instruction (the TOP-edge pair
+  // is not discoverable without it — it carries no soft-key tab, unlike the
+  // front buttons). It names the top pair, not "left/right": handleInput above
+  // wires Btn::Up/Btn::Down (top-LEFT/top-RIGHT edge ladder, Input.h:5-12) to
+  // -1/+1 set, while front Btn::Left/Btn::Right (the UP/DOWN tabs) only move the
+  // selection. "-/+" matches Block's edge-tab labels (BlockScene.cpp:443-445).
+  const char* syncLine = _localMsg[0] ? _localMsg : L10N("Use the top buttons (-/+) to count sets.", "Usa i tasti in alto (-/+) per le serie.");
   char sync[96];
   truncateToWidth(gfx, kFontSmall, syncLine, w - 2 * kMarginX - 96, sync, sizeof(sync));
   gfx.drawText(kFontSmall, kMarginX, syncY, sync);

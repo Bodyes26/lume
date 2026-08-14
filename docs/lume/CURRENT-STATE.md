@@ -46,9 +46,10 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 * Servizio e caratteristiche GATT hanno UUID Lume propri; una identità BLE
   random-static deterministica, derivata dal MAC hardware, impedisce alla vecchia
   app Flowe di riusare il peripheral e gli handle CoreBluetooth in cache.
-* Versione a schermo/protocollo HTTP: `0.1.0-dev` in
-  `xphone-os/src/scenes/AppScenes.h` (il simbolo storico `XPHONE_VERSION` è mantenuto
-  per ridurre il diff upstream; non è testo visibile).
+* Versione a schermo/protocollo HTTP: macro `XPHONE_VERSION` in
+  `xphone-os/src/scenes/AppScenes.h`, default `0.1.0-dev` per le build locali e
+  sovrascritta con la versione del tag dal workflow di release (il simbolo storico
+  `XPHONE_VERSION` è mantenuto per ridurre il diff upstream; non è testo visibile).
 * Boot splash: wordmark `lume` + nuovo mark geometrico scalabile in
   `xphone-os/src/art/LumeMark.h`; il bitmap `FloweLogo.h` è stato rimosso.
 * Launcher, sleep face, dormant priorities, About, Settings e File Transfer mostrano
@@ -351,6 +352,32 @@ Unico ramo mai eseguito su hardware: la **riscrittura** del chip da `time.sync`,
 perché lo scarto è sempre stato zero. È coperto dai test host (`set()` con BCD,
 24 ore, secolo 0, giorno-settimana e azzeramento di OSF) e si attiverà da solo
 la prima volta che il chip devierà di oltre un minuto o perderà l'oscillatore.
+
+## Lotto di correzioni dal backlog (14/08/2026)
+
+Sei voci di [09-cose-da-sistemare.md](09-cose-da-sistemare.md), scelte perché
+piccole, indipendenti e utili subito. Ogni voce è marcata RISOLTA nel backlog.
+
+| Voce | Cosa era rotto | Fix |
+|---|---|---|
+| 15 (P1) | **About sfondava la barra soft-key**: 24 righe da y=16, ultima riga a y=799 su un pannello alto 792, quindi il suggerimento finale era invisibile. La riga `orologio:` di v0.4 ha peggiorato il problema — regressione introdotta in questa sessione | `AboutScene` paginata in due (identità/boot/orologio/heap/refresh, poi power/radio/BLE/stack/hint), soft-key `PREC`/`SUCC`, indicatore `1/2`, `onEnter()` che riparte da pagina 1. Pagina 1 finisce a y=453, pagina 2 a y=420, contro il limite di 748 |
+| 13 (P1) | **Campi card troncati a byte**: una priorità con accento o emoji sul limite lasciava una sequenza UTF-8 mozza → mojibake sul vetro. Il percorso ANCS faceva già la cosa giusta con `clipUtf8` | `src/ble/Utf8Clip.h`: unica implementazione, tre overload, usata da entrambi i percorsi. 49 siti convertiti in `CompanionBleService.cpp`, più `BlockStatusStore` (slot 24/16 B contro cap card 96/48 B: il taglio vero avveniva lì) e la sync line di `PrioritiesStore` |
+| 20 (P1) | **Statistiche di lettura gonfiate**: `ReadingStats::pageTurn()` era chiamata prima dei controlli di limite, quindi premere avanti a fine libro contava pagine mai girate | conteggio spostato nei soli rami che cambiano pagina; il roll di capitolo conta una volta sola, differito a `workBuildSection()` quando serve indicizzare, e annullato se la build fallisce |
+| 16 (P1) | **`_durationCustomized` mai resettato**: dopo un solo tap su `+`, il device ignorava per il resto del boot la durata configurata sul telefono | azzerato in `BlockScene::onEnter()`: la personalizzazione vale per la visita alla scena |
+| 19 (P1) | **Hint di Workout con i tasti sbagliati**: diceva left/right (che spostano solo la selezione) mentre i set si contano coi tasti in alto | testo riscritto in IT/EN sui tasti reali |
+| 14 (P1) | **Etichette dell'anteprima "Icon style" sfasate**: `kLabels` in ordine diverso dalle colonne di `XPhoneIconPacks`, che è ciò che `iconForApp(i)` indicizza | ordine allineato a `Today, Notifiche, Priorità, Focus, Leggi, Allenamento`, con la fonte citata nel commento. Corretta anche la riga di intestazione di `LauncherIcons.h`, che dichiarava l'ordine sbagliato: era la causa radice |
+| 6 (P0) | **`doFlash()` pilotava il pannello senza `waitFlushIdle()`**: un flush e-ink in volo e una scrittura OTA sullo stesso bus SPI, cioè immagine mezza scritta e device che non boota | `SCENES.waitFlushIdle()` + `in.suspendTask()` prima di toccare pannello e SD, `Input::resumeTask()` sul solo percorso che ritorna (flash fallito) |
+| 4, 5, 41 (CI) | cache di release che includeva `.pio/build` con chiave sul solo `platformio.ini` (una release poteva contenere oggetti di un altro commit); `XPHONE_VERSION` slegata dal tag; nessuna CI su push/PR | cache ridotta a `~/.platformio`; `XPHONE_VERSION` è ora una macro con default `#ifndef`, iniettata dal tag via `PLATFORMIO_BUILD_FLAGS`; nuovo `.github/workflows/ci.yml` che esegue test host + entrambe le build su push e PR |
+
+Verifica: `sh test/host/run.sh` 4/4 verde, `pio run -e lume-x3-it -e lume-x3-en`
+SUCCESS. **RAM invariata** a 144.996 B; flash 2.532.765 B (IT) e 2.532.049 B (EN),
+cioè +532 B su ciascuna rispetto alla sola v0.4. Nessun warning nuovo.
+
+Da guardare sul vetro al prossimo flash: le due pagine di About con `PREC`/`SUCC`
+e la riga finale interamente visibile; le etichette dell'anteprima Icon style
+allineate alle icone; l'hint di Workout; e — con un `.bin` volutamente non valido
+in Settings → aggiornamento firmware — i tasti che rispondono di nuovo dopo la X
+di errore, che è la prova del `resumeTask()`.
 
 ## Prossime azioni
 

@@ -21,6 +21,7 @@
 #include "../LumeLocale.h"
 #include "BleShim.h"
 #include "CompanionBleService.h"
+#include "Utf8Clip.h"
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include <host/ble_gap.h>
@@ -170,33 +171,6 @@ uint32_t readLe32(const uint8_t* data) {
 
 uint16_t readLe16(const uint8_t* data) {
   return static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
-}
-
-// Clip raw attribute bytes into a fixed NUL-terminated buffer. When the clip
-// cuts a multi-byte UTF-8 sequence, the incomplete tail is stripped
-// (continuation bytes 0b10xxxxxx plus the cut lead byte) so no mojibake
-// garbage renders on glass.
-void clipUtf8(char* dst, std::size_t dstSize, const uint8_t* data, std::size_t length) {
-  if (dstSize == 0) return;
-  std::size_t count = std::min(length, dstSize - 1);
-  const bool clipped = count < length;
-  std::memcpy(dst, data, count);
-  if (clipped && count > 0) {
-    // Walk back over trailing continuation bytes.
-    std::size_t i = count;
-    while (i > 0 && (static_cast<uint8_t>(dst[i - 1]) & 0xC0) == 0x80) --i;
-    if (i > 0) {
-      const uint8_t lead = static_cast<uint8_t>(dst[i - 1]);
-      std::size_t seqLen = 1;
-      if ((lead & 0xE0) == 0xC0) seqLen = 2;
-      else if ((lead & 0xF0) == 0xE0) seqLen = 3;
-      else if ((lead & 0xF8) == 0xF0) seqLen = 4;
-      if (seqLen > 1 && (count - (i - 1)) < seqLen) count = i - 1;  // cut sequence
-    } else {
-      count = 0;  // buffer is nothing but continuation bytes
-    }
-  }
-  dst[count] = '\0';
 }
 
 // Decode one UTF-8 codepoint at *p, advancing *p past it; returns 0 at NUL.

@@ -32,6 +32,7 @@
 #include "../net/WifiCreds.h"
 #include "BleShim.h"
 #include "CompanionAncsClient.h"
+#include "Utf8Clip.h"
 
 #if defined(CONFIG_NIMBLE_ENABLED)
 #include <host/ble_att.h>
@@ -102,15 +103,6 @@ void addCompleteName(BLEAdvertisementData& data, const char* name) {
   const char header[] = {static_cast<char>(length + 1), static_cast<char>(ESP_BLE_AD_TYPE_NAME_CMPL)};
   data.addData(const_cast<char*>(header), sizeof(header));
   data.addData(const_cast<char*>(name), length);
-}
-
-std::string clippedString(const char* value, std::size_t maxChars) {
-  if (!value) return {};
-  std::string out(value);
-  if (out.size() > maxChars) {
-    out.resize(maxChars);
-  }
-  return out;
 }
 
 bool hasPrefix(const char* value, const char* prefix) {
@@ -922,18 +914,18 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   }
 
   next->hasCard = true;
-  next->id = clippedString(doc["id"] | "card", CompanionProtocol::MAX_ID_CHARS);
-  next->kind = clippedString(doc["kind"] | (doc["type"] | ""), CompanionProtocol::MAX_ID_CHARS);
-  next->title = clippedString(doc["title"] | "Untitled", CompanionProtocol::MAX_TITLE_CHARS);
-  next->body = clippedString(doc["body"] | "", CompanionProtocol::MAX_BODY_CHARS);
-  next->state = clippedString(doc["state"] | "", CompanionProtocol::MAX_ID_CHARS);
-  next->preset = clippedString(doc["preset"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-  next->todayWeather = clippedString(doc["weather"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-  next->todayHighLow = clippedString(doc["highLow"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-  next->todaySync = clippedString(doc["sync"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-  next->mailSource = clippedString(doc["mailSource"] | "", CompanionProtocol::MAX_SOURCE_CHARS);
-  next->mailSync = clippedString(doc["mailSync"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-  next->endsAtLabel = clippedString(doc["endsAtLabel"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+  next->id = clipUtf8(doc["id"] | "card", CompanionProtocol::MAX_ID_CHARS);
+  next->kind = clipUtf8(doc["kind"] | (doc["type"] | ""), CompanionProtocol::MAX_ID_CHARS);
+  next->title = clipUtf8(doc["title"] | "Untitled", CompanionProtocol::MAX_TITLE_CHARS);
+  next->body = clipUtf8(doc["body"] | "", CompanionProtocol::MAX_BODY_CHARS);
+  next->state = clipUtf8(doc["state"] | "", CompanionProtocol::MAX_ID_CHARS);
+  next->preset = clipUtf8(doc["preset"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+  next->todayWeather = clipUtf8(doc["weather"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+  next->todayHighLow = clipUtf8(doc["highLow"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+  next->todaySync = clipUtf8(doc["sync"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+  next->mailSource = clipUtf8(doc["mailSource"] | "", CompanionProtocol::MAX_SOURCE_CHARS);
+  next->mailSync = clipUtf8(doc["mailSync"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+  next->endsAtLabel = clipUtf8(doc["endsAtLabel"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
   next->part = doc["part"] | 0;
   next->parts = doc["parts"] | 1;
   next->durationMinutes = doc["durationMinutes"] | 0;
@@ -945,17 +937,17 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
   JsonObject source = doc["source"].as<JsonObject>();
   if (!source.isNull()) {
     next->source =
-        clippedString(source["displayName"] | (source["app"] | "iPhone"), CompanionProtocol::MAX_SOURCE_CHARS);
+        clipUtf8(source["displayName"] | (source["app"] | "iPhone"), CompanionProtocol::MAX_SOURCE_CHARS);
   } else {
-    next->source = clippedString(doc["source"] | "iPhone", CompanionProtocol::MAX_SOURCE_CHARS);
+    next->source = clipUtf8(doc["source"] | "iPhone", CompanionProtocol::MAX_SOURCE_CHARS);
   }
 
   JsonArray actions = doc["actions"].as<JsonArray>();
   for (JsonVariant action : actions) {
     if (next->actionCount >= CompanionProtocol::MAX_ACTIONS) break;
     auto& target = next->actions[next->actionCount++];
-    target.id = clippedString(action["id"] | "", CompanionProtocol::MAX_ID_CHARS);
-    target.label = clippedString(action["label"] | "Send", CompanionProtocol::MAX_ACTION_LABEL_CHARS);
+    target.id = clipUtf8(action["id"] | "", CompanionProtocol::MAX_ID_CHARS);
+    target.label = clipUtf8(action["label"] | "Send", CompanionProtocol::MAX_ACTION_LABEL_CHARS);
     if (target.id.empty()) target.id = target.label;
   }
 
@@ -965,18 +957,18 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     auto& target = next->todayItems[next->todayItemCount++];
     if (item.is<JsonArray>()) {
       JsonArray fields = item.as<JsonArray>();
-      target.kind = clippedString(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.time = clippedString(fields[1] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.title = clippedString(fields[2] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.subtitle = clippedString(fields[3] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.state = clippedString(fields[4] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.kind = clipUtf8(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.time = clipUtf8(fields[1] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.title = clipUtf8(fields[2] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.subtitle = clipUtf8(fields[3] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.state = clipUtf8(fields[4] | "", CompanionProtocol::MAX_ID_CHARS);
     } else if (item.is<JsonObject>()) {
       JsonObject fields = item.as<JsonObject>();
-      target.kind = clippedString(fields["kind"] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.time = clippedString(fields["time"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.title = clippedString(fields["title"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.subtitle = clippedString(fields["subtitle"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.state = clippedString(fields["state"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.kind = clipUtf8(fields["kind"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.time = clipUtf8(fields["time"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.title = clipUtf8(fields["title"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.subtitle = clipUtf8(fields["subtitle"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.state = clipUtf8(fields["state"] | "", CompanionProtocol::MAX_ID_CHARS);
     }
   }
 
@@ -986,20 +978,20 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     auto& target = next->mailItems[next->mailItemCount++];
     if (item.is<JsonArray>()) {
       JsonArray fields = item.as<JsonArray>();
-      target.id = clippedString(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.from = clippedString(fields[1] | "", CompanionProtocol::MAX_SOURCE_CHARS);
-      target.subject = clippedString(fields[2] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.preview = clippedString(fields[3] | "", CompanionProtocol::MAX_MAIL_FIELD_CHARS);
-      target.time = clippedString(fields[4] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.state = clippedString(fields[5] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.id = clipUtf8(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.from = clipUtf8(fields[1] | "", CompanionProtocol::MAX_SOURCE_CHARS);
+      target.subject = clipUtf8(fields[2] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.preview = clipUtf8(fields[3] | "", CompanionProtocol::MAX_MAIL_FIELD_CHARS);
+      target.time = clipUtf8(fields[4] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.state = clipUtf8(fields[5] | "", CompanionProtocol::MAX_ID_CHARS);
     } else if (item.is<JsonObject>()) {
       JsonObject fields = item.as<JsonObject>();
-      target.id = clippedString(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.from = clippedString(fields["from"] | "", CompanionProtocol::MAX_SOURCE_CHARS);
-      target.subject = clippedString(fields["subject"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.preview = clippedString(fields["preview"] | "", CompanionProtocol::MAX_MAIL_FIELD_CHARS);
-      target.time = clippedString(fields["time"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
-      target.state = clippedString(fields["state"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.id = clipUtf8(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.from = clipUtf8(fields["from"] | "", CompanionProtocol::MAX_SOURCE_CHARS);
+      target.subject = clipUtf8(fields["subject"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.preview = clipUtf8(fields["preview"] | "", CompanionProtocol::MAX_MAIL_FIELD_CHARS);
+      target.time = clipUtf8(fields["time"] | "", CompanionProtocol::MAX_TODAY_FIELD_CHARS);
+      target.state = clipUtf8(fields["state"] | "", CompanionProtocol::MAX_ID_CHARS);
     }
   }
 
@@ -1013,15 +1005,15 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     auto& target = next->priorityItems[next->priorityItemCount++];
     if (item.is<JsonArray>()) {
       JsonArray fields = item.as<JsonArray>();
-      target.id = clippedString(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.title = clippedString(fields[1] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.note = clippedString(fields[2] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
+      target.id = clipUtf8(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.title = clipUtf8(fields[1] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.note = clipUtf8(fields[2] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
       target.done = fields[3] | false;
     } else if (item.is<JsonObject>()) {
       JsonObject fields = item.as<JsonObject>();
-      target.id = clippedString(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.title = clippedString(fields["title"] | "", CompanionProtocol::MAX_TITLE_CHARS);
-      target.note = clippedString(fields["note"] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
+      target.id = clipUtf8(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.title = clipUtf8(fields["title"] | "", CompanionProtocol::MAX_TITLE_CHARS);
+      target.note = clipUtf8(fields["note"] | "", CompanionProtocol::MAX_PRIORITY_FIELD_CHARS);
       target.done = fields["done"] | false;
     }
   }
@@ -1034,19 +1026,19 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     auto& target = next->workoutItems[next->workoutItemCount++];
     if (item.is<JsonArray>()) {
       JsonArray fields = item.as<JsonArray>();
-      target.id = clippedString(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.name = clippedString(fields[1] | "", CompanionProtocol::MAX_WORKOUT_NAME_CHARS);
+      target.id = clipUtf8(fields[0] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.name = clipUtf8(fields[1] | "", CompanionProtocol::MAX_WORKOUT_NAME_CHARS);
       target.sets = fields[2] | 0;
       target.done = fields[3] | 0;
     } else if (item.is<JsonObject>()) {
       JsonObject fields = item.as<JsonObject>();
-      target.id = clippedString(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
-      target.name = clippedString(fields["name"] | "", CompanionProtocol::MAX_WORKOUT_NAME_CHARS);
+      target.id = clipUtf8(fields["id"] | "", CompanionProtocol::MAX_ID_CHARS);
+      target.name = clipUtf8(fields["name"] | "", CompanionProtocol::MAX_WORKOUT_NAME_CHARS);
       target.sets = fields["sets"] | 0;
       target.done = fields["done"] | 0;
     }
   }
-  next->workoutDate = clippedString(doc["workoutDate"] | "", 16);
+  next->workoutDate = clipUtf8(doc["workoutDate"] | "", 16);
 
   // Service-level priorities capture (predicate matches x4-os
   // CompanionBleService.cpp:60 and its isPrioritiesSnapshotCard branch at

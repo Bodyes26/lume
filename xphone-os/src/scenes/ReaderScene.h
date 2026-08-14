@@ -137,6 +137,10 @@ class ReaderScene : public Scene {
   bool _hadProgress = false;
   int _prefetchAttemptedSpine = -1;  // never retry a failed/checked prefetch
   int _pageLoadRetries = 0;
+  // A page turn crossed a chapter boundary into a section whose cache still
+  // has to be built: the shown page only changes when workBuildSection()
+  // lands, so ReadingStats counts that turn there, not in pageTurn().
+  bool _turnAwaitsIndex = false;
   const char* _errorMsg = "";
 
   BookEntry _books[kMaxBooks];  // ~9KB BSS (scene is a static instance)

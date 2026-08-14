@@ -86,7 +86,9 @@ anche bond BLE, slot OTA e spiffs.
 `.github/workflows/firmware-release.yml` (`Lume Firmware Release`) parte su tag
 `fw-v*` o `workflow_dispatch`, usa Python 3.11 e PlatformIO 6.1.19, quindi:
 
-1. compila `lume-x3-it` e `lume-x3-en`;
+1. esegue i test host (`sh test/host/run.sh`) e compila `lume-x3-it` e
+   `lume-x3-en` con `PLATFORMIO_BUILD_FLAGS=-DXPHONE_VERSION='"<tag senza
+   fw-v>"'`, così About e `GET /health` riportano la versione rilasciata;
 2. pubblica `update_it.bin`, `update_en.bin`, `lume-x3-it.bin`,
    `lume-x3-en.bin` e copie versionate;
 3. crea `lume-x3-it.zip` e `lume-x3-en.zip`, ciascuno con il corretto
@@ -96,10 +98,19 @@ anche bond BLE, slot OTA e spiffs.
    `assets.x3.locales.it/en`;
 6. crea la GitHub Release tramite `softprops/action-gh-release@v2`.
 
+La cache è limitata a `~/.platformio` (toolchain e librerie): `.pio/build` non
+viene mai messa in cache, perché la chiave dipende solo da `platformio.ini` e
+una release finirebbe per contenere oggetti di un commit qualsiasi.
+
+`.github/workflows/ci.yml` (`Lume CI`) gira invece su ogni push e su ogni pull
+request con le stesse versioni di Python e PlatformIO: test host più le due
+build, senza artefatti. Serve a non scoprire al momento del tag che l'albero non
+compila.
+
 Per un fork: abilitare Actions, concedere al `GITHUB_TOKEN` permessi contents
-read/write e taggare `fw-vX.Y.Z`. Nessun segreto applicativo è richiesto. Il
-workflow non verifica la corrispondenza tra tag e `XPHONE_VERSION`: allinearli
-prima del tag.
+read/write e taggare `fw-vX.Y.Z`. Nessun segreto applicativo è richiesto. La
+versione compilata viene dal tag; il default `0.1.0-dev` in
+`src/scenes/AppScenes.h` vale solo per le build locali.
 
 ## 5. Licenze
 
@@ -189,9 +200,9 @@ git switch -c patch/rebrand fork/main
 ## Cose da sistemare / attriti
 
 1. **`x3` e `x4` producono lo stesso binario, ma la release lo pubblica come due file diversi.** Tutti gli env definiscono `FREEINK_DEVICE_X3=1` e `FREEINK_DEVICE_X4=1` (`platformio.ini:99-100,114-115,122-123`) e `FREEINK_BATTERY_I2C_GAUGE` è già implicato da `FREEINK_DEVICE_X3` (`freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h:158-159`); la CI compila due volte e produce `flowe-x3.bin`/`flowe-x4.bin` (`firmware-release.yml:57,62-63`) suggerendo all'utente una scelta che non esiste. Gravità: media. Fix: un solo env (`xteink`) con un solo artefatto `flowe.bin` + `update.bin`, alias env rimossi.
-2. **Cache CI mai aggiornata → rischio di binario stale nella release.** La chiave è `hashFiles('xphone-os/platformio.ini')` (`firmware-release.yml:36`) ma il path in cache include `xphone-os/.pio/build`: finché `platformio.ini` non cambia la chiave fa hit e la cache non viene mai riscritta, quindi ogni release riparte da una `.pio/build` di un commit arbitrario. Gravità: alta (con LTO gli artefatti intermedi sono grandi e la fiducia sta tutta in SCons). Fix: rimuovere `xphone-os/.pio/build` dalla cache e cachare solo `~/.platformio`.
-3. **Nessuna verifica che il tag corrisponda alla versione compilata.** `RELEASE_TAG`/`VERSION` vengono dal tag (`firmware-release.yml:45-51`) mentre la versione nel firmware è la costante `XPHONE_VERSION = "0.5.0"` (`src/scenes/AppScenes.h:10`); un tag `fw-v0.6.0` produce un device che dice "0.5.0" in About e su `GET /health`. Gravità: alta (supporto: la versione riportata dall'utente è falsa). Fix: step che confronta il define col tag e fallisce, o `-DXPHONE_VERSION` iniettato dal tag.
-4. **Nessuna CI su push/PR.** L'unico workflow parte su tag `fw-v*` o dispatch (`firmware-release.yml:3-12`): un fork può mergiare codice che non compila e scoprirlo solo al momento del rilascio. Gravità: media. Fix: workflow `on: [push, pull_request]` che esegue `pio run -e xteink`.
+2. ~~**Cache CI mai aggiornata → rischio di binario stale nella release.**~~ **RISOLTA in Lume**: la cache di `firmware-release.yml` contiene solo `~/.platformio`, `xphone-os/.pio/build` non è più cachata, quindi ogni release ricompila i sorgenti del commit taggato.
+3. ~~**Nessuna verifica che il tag corrisponda alla versione compilata.**~~ **RISOLTA in Lume**: `XPHONE_VERSION` è una macro con default `#ifndef` (`src/scenes/AppScenes.h`) e la release la sovrascrive dal tag via `PLATFORMIO_BUILD_FLAGS`, quindi About e `GET /health` non possono più mentire.
+4. ~~**Nessuna CI su push/PR.**~~ **RISOLTA in Lume**: `.github/workflows/ci.yml` esegue i test host e `pio run -e lume-x3-it -e lume-x3-en` su ogni push e pull request.
 5. **Lo zip esiste solo per X3, ma il README dice di scaricare "lo zip per il tuo device".** `README.md:87` promette `flowe-x3` o `flowe-x4`; la CI crea solo `flowe-x3.zip` (`firmware-release.yml:71-83`). Anche `latest.json` non elenca né lo zip né `update.bin` (`:109-127`). Gravità: media. Fix: unico zip (vista la nota 1) e README allineato.
 6. **README stale sul nome BLE annunciato.** `xphone-os/README.md:239-240` dice che il device si annuncia come `X4 Companion`; il codice annuncia `"xphone X3"`/`"xphone X4"` (`src/ble/CompanionProtocol.h:25`). Chi riscrive l'app companion, cercando per nome, non trova nulla. Gravità: media. Fix: aggiornare il README e ribadire che la scoperta va fatta per SERVICE_UUID.
 7. **Comandi di build contraddittori nel README radice.** `README.md:107-109` elenca `pio run -e x4` due volte, una volta come "hardware-validated" e una come "compiles; not validated on hardware"; `xphone-os/README.md:2-5` afferma solo-X3, mentre il commit `e8b43a5` dichiara "X3 and X4 both hardware-validated". Gravità: bassa. Fix: una sola riga per env e uno stato hardware unico.

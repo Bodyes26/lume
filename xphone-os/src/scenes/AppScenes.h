@@ -7,7 +7,17 @@
 
 #include <cstdint>
 
-constexpr const char* XPHONE_VERSION = "0.1.0-dev";
+// Firmware version shown in About (AboutScene.cpp:36), in the Settings header
+// and footer (SettingsScene.cpp:287,300) and served by GET /health and
+// GET /info (net/FileTransferServer.cpp:70,146,155). A macro, not a constant,
+// so the release workflow can inject the released tag with
+// -DXPHONE_VERSION='"<tag>"' (.github/workflows/firmware-release.yml) instead
+// of shipping an image whose About lies about its own version. Local builds
+// pass no flag and keep the default below. The historic symbol name is kept to
+// minimise the diff with upstream (docs/lume/CURRENT-STATE.md:49-51).
+#ifndef XPHONE_VERSION
+#define XPHONE_VERSION "0.1.0-dev"
+#endif
 
 // M4.2 last-scene restore: a stable id for each restorable scene. Persisted in
 // RTC memory at sleep (Sleep.cpp) and dispatched by boot() on wake so the

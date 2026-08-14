@@ -29,7 +29,9 @@ class SettingsScene : public Scene {
   void enterPicker();
   void enterIconStyle();
   void scanBinFiles();
-  void doFlash();
+  // Takes the tick's Input so it can stop the sampling task before touching
+  // the SPI bus — no globals; handleInput() already owns the reference.
+  void doFlash(Input& in);
   void moveSel(int& sel, int count, int delta);
   void cycleIconPack(int delta);
 
