@@ -32,9 +32,11 @@ class BlockStatusStore {
     bool active = false;            // block running (state active/break or heuristics)
     bool onBreak = false;          // block paused on a break
     // Provenance: true = a live block-status card from the phone; false = the
-    // boot/wake NVS seed. BlockScene needs the distinction — a seed has no
-    // elapsed-time info (no RTC), so it must render the absolute end label,
-    // never a countdown, and must lose to any real card.
+    // boot/wake NVS seed. BlockScene needs the distinction — a seed carries no
+    // anchor for the running countdown (the DS3231 gives wall time, but the
+    // block's end is only known as the phone's localized endsAtLabel string),
+    // so it must render the absolute end label, never a countdown, and must
+    // lose to any real card.
     bool fromCard = false;
     bool ready = false;            // card state == "ready" (preset view); seeds never set it
     int remainingMinutes = 0;      // countdown minutes the phone reported
@@ -56,8 +58,9 @@ class BlockStatusStore {
 
   // M4.3 wake-from-active-block: seed the store from the NVS snapshot persisted
   // at the last sleep, BEFORE BLE reconnects. Lets BlockScene render the locked
-  // ("active") view instantly on wake using the ABSOLUTE end-time label (no RTC
-  // on X3/X4, so a persisted minute countdown would be wrong). A fresh
+  // ("active") view instantly on wake using the ABSOLUTE end-time label (a
+  // persisted minute countdown would be wrong: sleep length is unknown to the
+  // seed, and the end time only exists as a display string). A fresh
   // block-status card after reconnect supersedes this via updateFromCard().
   void seedFromPersisted(bool active, bool onBreak, int remainingMinutes, int durationMinutes, const char* preset,
                          const char* endsAtLabel);

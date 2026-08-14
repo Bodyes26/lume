@@ -6,10 +6,12 @@ ESP32-C3 firmware architecture and companion protocol while moving toward an
 Italian, configurable desk dashboard and a new iOS companion app.
 
 **Current state:** firmware `0.1.0-dev` is accepted on an X3; the native SwiftUI
-Lume companion now implements the first v0.2 vertical slice: CoreBluetooth
-discovery/restoration, time sync, and persistent Priorities snapshot/toggle.
-Today, Workout, Block, reader transfer and Screen Time control remain on the
-roadmap. The EPUB reader works independently from the phone.
+Lume companion implements the first v0.2 vertical slice: CoreBluetooth
+discovery/restoration, time sync, and persistent Priorities and Today snapshots.
+The X3's DS3231 is driven as a real clock — hardware-verified, so the device
+knows the date and time on wake with no phone in range. Workout, Block, reader
+transfer and Screen Time control remain on the roadmap. The EPUB reader works
+independently from the phone.
 
 Development decisions, verified architecture notes and the cross-session
 handoff start at [`docs/lume/START-HERE.md`](docs/lume/START-HERE.md).
@@ -45,10 +47,11 @@ being replaced incrementally.
 
 The device spends most of its life asleep, so the sleep screen earns its
 keep: today's priorities as a poster, your next calendar event, and the
-state of any running block. Before the panel powers down, the firmware
-snapshots the current scene, block state, synced cards, and recent
-notifications to on-chip storage (reading position lives on the SD card) —
-so wake picks up where you left off.
+state of any running block, stamped with the time it was drawn. Before the
+panel powers down, the firmware snapshots the current scene, block state,
+synced cards, and recent notifications to on-chip storage (reading position
+lives on the SD card) — so wake picks up where you left off, with the date and
+time read straight from the on-board clock.
 
 <p align="center">
   <img src="docs/screens/poster.png" width="240" alt="Sleep screen" />
@@ -136,6 +139,14 @@ cd xphone-os
 ../.venv/bin/pio run -e lume-x3-it -e lume-x3-en
 ../.venv/bin/pio run -e lume-x3-it -t upload
 ../.venv/bin/pio device monitor --baud 115200
+```
+
+Pure logic — the clock/date math and the DS3231 register handling — has host
+tests that need no board and no PlatformIO:
+
+```sh
+cd xphone-os
+sh test/host/run.sh
 ```
 
 USB flashing needs the 4-pin data pogo cable — the 2-pin cable bundled with

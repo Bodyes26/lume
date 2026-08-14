@@ -17,7 +17,7 @@ Registro delle scelte (13 agosto 2026) e delle risposte alle domande di
 | 8 | Sicurezza HTTP | nessuna autenticazione per ora: la modalità è effimera e volontaria |
 | 9 | Rollback OTA | rinviato: siamo in alpha, si riflasha `update.bin` |
 | 10 | Card su link cifrato | **si fa** (fix da 2 punti, nessun costo d'uso: il pairing esiste già) |
-| 11 | RTC | si implementa: il DS3231 c'è sull'X3, il "no RTC" del codice era dovuto all'X4 |
+| 11 | RTC | **fatto e accettato in v0.4**: driver DS3231 in `xphone-os/src/Ds3231.{h,cpp}`, seed dell'orologio al boot, scrittura dal `time.sync`. Il "no RTC" del codice era dovuto all'X4; su questo X3 il tampone regge il power-off |
 | 12 | Tempo | nessuna scadenza; rilasci incrementali |
 
 ## Cosa significavano i P0 di sicurezza, in concreto

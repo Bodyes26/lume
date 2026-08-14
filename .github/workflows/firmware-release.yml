@@ -53,6 +53,9 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
 
+      - name: Run host tests
+        run: cd xphone-os && sh test/host/run.sh
+
       - name: Build Italian and English Lume for X3
         run: cd xphone-os && pio run -e lume-x3-it -e lume-x3-en
 

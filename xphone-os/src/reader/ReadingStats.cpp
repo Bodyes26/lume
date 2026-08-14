@@ -58,46 +58,13 @@ uint32_t fnv1a(const char* s) {
   return h ? h : 1;  // 0 means "empty slot"
 }
 
-// Civil-calendar conversions (Howard Hinnant's algorithms) so streaks and the
-// 7-day window cross month/year boundaries correctly without <ctime>.
-int32_t daysFromCivil(int y, int m, int d) {
-  y -= m <= 2;
-  const int era = (y >= 0 ? y : y - 399) / 400;
-  const unsigned yoe = static_cast<unsigned>(y - era * 400);
-  const unsigned doy = (153u * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  return era * 146097 + static_cast<int32_t>(doe) - 719468;
-}
-void civilFromDays(int32_t z, int* y, int* m, int* d) {
-  z += 719468;
-  const int era = (z >= 0 ? z : z - 146096) / 146097;
-  const unsigned doe = static_cast<unsigned>(z - era * 146097);
-  const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-  const int yr = static_cast<int>(yoe) + era * 400;
-  const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-  const unsigned mp = (5 * doy + 2) / 153;
-  *d = static_cast<int>(doy - (153 * mp + 2) / 5 + 1);
-  *m = static_cast<int>(mp + (mp < 10 ? 3 : -9));
-  *y = yr + (*m <= 2);
-}
-int32_t serialFromYmd(uint32_t ymd) {
-  return daysFromCivil(static_cast<int>(ymd / 10000), static_cast<int>((ymd / 100) % 100),
-                       static_cast<int>(ymd % 100));
-}
-uint32_t ymdFromSerial(int32_t serial) {
-  int y, m, d;
-  civilFromDays(serial, &y, &m, &d);
-  return static_cast<uint32_t>(y) * 10000u + static_cast<uint32_t>(m) * 100u +
-         static_cast<uint32_t>(d);
-}
-
-// Today's yyyymmdd from the phone-synced clock, rolled forward by uptime.
-// 0 = no time.sync since boot; callers skip day attribution.
+// Today's yyyymmdd from the device clock (DS3231 seed at boot, or the phone's
+// time.sync), rolled forward by uptime. 0 = the clock was never set this boot;
+// callers skip day attribution. Civil-date math lives in ClockStore.
 uint32_t todayYmd() {
-  if (CLOCK_STORE.day == 0 || CLOCK_STORE.firstSyncMs == 0) return 0;
-  const uint32_t elapsedMin = (millis() - CLOCK_STORE.firstSyncMs) / 60000u;
-  const uint32_t totalMin = CLOCK_STORE.minutesIntoDay + elapsedMin;
-  return ymdFromSerial(serialFromYmd(CLOCK_STORE.day) + static_cast<int32_t>(totalMin / 1440u));
+  uint32_t ymd = 0;
+  uint16_t minutes = 0;
+  return clockNow(ymd, minutes) ? ymd : 0;
 }
 
 DayRec* dayRec(uint32_t ymd, bool createIfMissing) {
@@ -217,12 +184,12 @@ ReadingStats::Band ReadingStats::band() {
   out.clockValid = today != 0;
   if (!out.clockValid) return out;
 
-  const int32_t todaySerial = serialFromYmd(today);
+  const int32_t todaySerial = clockSerialFromYmd(today);
   // days-from-civil for 1970-01-01 is 0 and it was a Thursday; 0=Mon indexing.
   out.todayWeekday = static_cast<uint8_t>(((todaySerial % 7) + 7 + 3) % 7);
 
   for (int back = 0; back < 7; back++) {
-    const DayRec* d = dayRec(ymdFromSerial(todaySerial - back), false);
+    const DayRec* d = dayRec(clockYmdFromSerial(todaySerial - back), false);
     out.weekPages[6 - back] = d ? d->pages : 0;
   }
   out.todayPages = out.weekPages[6];
@@ -234,7 +201,7 @@ ReadingStats::Band ReadingStats::band() {
   if (!t || t->pages == 0) cursor--;
   uint16_t streak = 0;
   while (streak < 9999) {
-    const DayRec* d = dayRec(ymdFromSerial(cursor), false);
+    const DayRec* d = dayRec(clockYmdFromSerial(cursor), false);
     if (!d || d->pages == 0) break;
     streak++;
     cursor--;

@@ -493,9 +493,12 @@ void BlockScene::renderActive(Gfx& gfx, const BlockStatusStore::Status& card) {
   const char* title = presetTitle(card, L10N("Deep Work", "Focus profondo"));
 
   // A LIVE countdown exists only once we've latched an end from a real card
-  // (or the card still carries remainingMinutes). A pure wake-from-sleep
-  // seed has NO elapsed-time info (no RTC on X3/X4), so we must show the phone's
-  // ABSOLUTE end label ("until 10:30 AM") instead of a stale minute number.
+  // (or the card still carries remainingMinutes). A pure wake-from-sleep seed
+  // has no countdown anchor — the device clock knows the wall time now, but the
+  // block's end arrives only as the phone's localized label — so we must show
+  // the ABSOLUTE end label ("until 10:30 AM") instead of a stale minute number.
+  // Reconstructing a live countdown needs a numeric end time in the protocol,
+  // not a parse of that string (docs/lume/12-rtc-e-solo-x3.md §1.7, risk 7).
   const bool haveLive = _endValid || (card.fromCard && card.remainingMinutes > 0);
   const bool onBreak = card.onBreak;
 

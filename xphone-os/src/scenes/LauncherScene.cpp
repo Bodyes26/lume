@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "../BatteryGauge.h"
+#include "../ClockStore.h"
 #include "../Fonts.h"
 #include "../IconStyle.h"
 #include "../StatusBar.h"
@@ -175,6 +176,7 @@ void LauncherScene::render(Gfx& gfx) {
   // M2: BLE status dot left of the battery cluster — solid filled dot when
   // the iPhone is connected, hollow circle while advertising. Nothing before
   // the radio starts (BLE begins after the first launcher paint; see main.cpp).
+  int clockRight = battLeft;
   if (COMPANION_BLE.isStarted()) {
     const int d = 12;  // circle drawn as a fully-rounded rect
     const int dotX = battLeft - d - 10;
@@ -183,6 +185,22 @@ void LauncherScene::render(Gfx& gfx) {
       gfx.fillRoundedRect(dotX, dotY, d, d, d / 2, true);
     } else {
       gfx.drawRoundedRect(dotX, dotY, d, d, d / 2, 2, true);
+    }
+    clockRight = dotX;
+  }
+
+  // v0.4: local time (24h) left of the BLE dot, from the DS3231 seed or the
+  // phone's time.sync (ClockStore). It is sampled at repaint, not ticking: on
+  // e-ink a per-minute refresh would cost a panel flush a minute for a number
+  // nobody is watching. Wake and every scene switch repaint the bar, so the
+  // time is current whenever you come back to the launcher; a selection move
+  // only redraws tiles and leaves the bar (and the clock) as it was.
+  char clock[16];
+  if (clockFormatTime(clock, sizeof(clock))) {
+    const int textW = gfx.textWidth(kFontRegular, clock);
+    const int clockX = clockRight - 14 - textW;
+    if (clockX > kMargin + 34 + gfx.textWidth(kFontBold, "lume") + 12) {
+      gfx.drawText(kFontRegular, clockX, (barH - gfx.lineHeight(kFontRegular)) / 2 + 1, clock);
     }
   }
   gfx.fillRect(0, kStatusH - 2, w, 2, true);  // separator

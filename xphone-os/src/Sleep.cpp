@@ -16,6 +16,7 @@
 #include "esp_sleep.h"
 
 #include "BlockStatusStore.h"
+#include "ClockStore.h"
 #include "Fonts.h"
 #include "NotificationStore.h"
 #include "Gfx.h"
@@ -86,12 +87,24 @@ uint8_t gTombScratch[NotificationStore::TOMBSTONE_CAPACITY * sizeof(Notification
 // holds the day's list all night
 // (PrioritiesScene::renderDormant — list + moon/"lume" stamp + wake hint);
 // otherwise the original centered "lume" wordmark over a short rule, wake
-// hint at the bottom. RTC support is planned but not active yet, so no clock
-// or "synced Xm ago" stamp is shown. The panel controller stays powered while
-// awake; there is no idle-sleep middle state.
+// hint at the bottom. The panel controller stays powered while awake; there is
+// no idle-sleep middle state.
+// v0.4: the DS3231 gives real wall time, but this frame is painted once and
+// then frozen for hours — and no timed wake can repaint it (all six RTC-capable
+// GPIOs are taken and the battery latch cuts MCU power, docs/lume/
+// 12-rtc-e-solo-x3.md §1.8). So the corner stamp says when the frame was
+// drawn — honest, and it tells you how stale the list under it is — instead of
+// a clock that would be wrong the moment you look at it.
 // ---------------------------------------------------------------------------
 void drawSleepScreen(Gfx& gfx) {
   gfx.clear();
+
+  char clock[16];
+  if (clockFormatTime(clock, sizeof(clock))) {
+    char stamp[32];
+    snprintf(stamp, sizeof(stamp), L10N("asleep since %s", "dorme dalle %s"), clock);
+    gfx.drawText(kFontSmall, gfx.width() - 16 - gfx.textWidth(kFontSmall, stamp), 12, stamp);
+  }
 
   // Sleeping FROM the Workout scene: the workout list replaces the priorities
   // list; the footer stack (calendar + block + wake hint) stays identical so
@@ -218,7 +231,8 @@ void sleepNow(Gfx& gfx, Input& input) {
 
       // M4.3: persist a tiny Block snapshot so wake-from-active-block shows the
       // locked view instantly (seedPersistedBlock at boot). Absolute end-time
-      // label only — no minute countdown (no RTC, elapsed sleep time unknown).
+      // label only — no minute countdown: the block's end is a display string,
+      // so wall time alone cannot rebuild it (see BlockScene).
       // Clear the keys when no block is running so a stale snapshot never
       // resurrects a finished block.
       const BlockStatusStore::Status blk = BLOCK_STATUS.get();

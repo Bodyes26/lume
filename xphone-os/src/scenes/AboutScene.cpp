@@ -8,6 +8,7 @@
 
 #include "../BatteryGauge.h"
 #include "../ClockStore.h"
+#include "../Ds3231.h"
 #include "../Fonts.h"
 #include "../NotificationStore.h"
 #include "../Sleep.h"
@@ -51,17 +52,47 @@ void AboutScene::render(Gfx& gfx) {
   gfx.drawText(kFontRegular, x, y, line);
   y += gfx.lineHeight(kFontRegular) + 4;
 
+  // v0.4 clock readout: what the device believes the local time is, where that
+  // came from, and what the DS3231 itself reports. `rtc: OSF` after a power-off
+  // is the on-glass verdict on the backup cell — the whole reason the hardware
+  // clock can be trusted or not (docs/lume/12-rtc-e-solo-x3.md §1.1).
+  {
+    char clock[16];
+    char date[20];
+    const bool haveClock = clockFormatTime(clock, sizeof(clock)) && clockFormatShortDate(date, sizeof(date));
+
+    char rtcState[24];
+    bool stopped = false;
+    int16_t tenthsC = 0;
+    if (!Ds3231::oscillatorStopped(stopped)) {
+      snprintf(rtcState, sizeof(rtcState), L10N("absent", "assente"));
+    } else if (stopped) {
+      snprintf(rtcState, sizeof(rtcState), L10N("OSF (time lost)", "OSF (ora persa)"));
+    } else if (Ds3231::readTemperatureTenthsC(tenthsC)) {
+      snprintf(rtcState, sizeof(rtcState), "ok  %d.%u C", tenthsC / 10,
+               static_cast<unsigned>(tenthsC < 0 ? -tenthsC % 10 : tenthsC % 10));
+    } else {
+      snprintf(rtcState, sizeof(rtcState), "ok");
+    }
+
+    if (haveClock) {
+      snprintf(line, sizeof(line), L10N("clock: %s %s (%s)  rtc: %s", "orologio: %s %s (%s)  rtc: %s"), clock, date,
+               CLOCK_STORE.fromRtc ? "rtc" : "iPhone", rtcState);
+    } else {
+      snprintf(line, sizeof(line), L10N("clock: not set  rtc: %s", "orologio: non impostato  rtc: %s"), rtcState);
+    }
+  }
+  gfx.drawText(kFontRegular, x, y, line);
+  y += gfx.lineHeight(kFontRegular) + 4;
+
   // Phase 0 morning-meditation spec: wake→BLE-connect and wake→date latency
   // (millis() starts ~0 at boot, so the stamps ARE the delays). This readout
   // is the experiment — no serial cable needed.
-  if (CLOCK_STORE.firstSyncMs != 0) {
+  if (CLOCK_STORE.firstPhoneSyncMs != 0) {
     snprintf(line, sizeof(line),
-             L10N("time.sync: ble %lu ms  date %lu ms  %02u:%02u",
-                  "time.sync: ble %lu ms  data %lu ms  %02u:%02u"),
+             L10N("time.sync: ble %lu ms  date %lu ms", "time.sync: ble %lu ms  data %lu ms"),
              static_cast<unsigned long>(CLOCK_STORE.firstConnectMs),
-             static_cast<unsigned long>(CLOCK_STORE.firstSyncMs),
-             static_cast<unsigned>(CLOCK_STORE.minutesIntoDay / 60),
-             static_cast<unsigned>(CLOCK_STORE.minutesIntoDay % 60));
+             static_cast<unsigned long>(CLOCK_STORE.firstPhoneSyncMs));
   } else if (CLOCK_STORE.firstConnectMs != 0) {
     snprintf(line, sizeof(line), L10N("time.sync: ble %lu ms  date pending",
                                      "time.sync: ble %lu ms  data in attesa"),

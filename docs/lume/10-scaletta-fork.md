@@ -101,24 +101,50 @@ una scena applicativa, soft-key, accenti e layout confermati corretti sul vetro.
 Dettagli in [CURRENT-STATE.md](CURRENT-STATE.md).
 
 ## v0.4 — Orologio vero (DS3231)
+**Stato:** completata, flashata e accettata sull'X3 il 14/08/2026. Il DS3231 di
+questo esemplare teneva già l'ora locale corretta (OSF a 0) e il tampone regge il
+power-off: la conferma sul vetro e il test VBAT sono di Maurizio.
 
-L'X3 ha un **DS3231 montato** (più un IMU QMI8658), oggi interrogati solo come
+L'X3 ha un **DS3231 montato** (più un IMU QMI8658), prima interrogati solo come
 fingerprint di identità; l'X4 non li ha, da qui il "no RTC" del codice.
 
-* La lib `Rtc` del SDK parla **solo PCF8563** e non è nemmeno in `lib_deps`: usarla
-  produrrebbe letture disallineate di 2 registri **senza errori I2C**. Serve un driver
-  DS3231 nuovo (I²C 0x68 su SDA20/SCL0, lo stesso bus del gauge): tempo BCD da 0x00,
-  flag OSF in 0x0F.
-* Integrazione a costo quasi nullo: `ReadingStats::todayYmd()` usa solo `day`,
-  `minutesIntoDay`, `firstSyncMs` di `ClockStore` → seedandoli al boot dall'RTC,
-  statistiche, streak e countdown Block funzionano **offline** senza toccare altro.
-* **Limite verificato**: la sveglia temporizzata da deep sleep non è ottenibile in
-  software. I soli GPIO wake-capable dell'ESP32-C3 (0-5) sono tutti occupati, e a
-  batteria il latch GPIO13 toglie corrente all'MCU. Richiederebbe un wire-OR del pin
-  INT/SQW su GPIO3 = saldatura. Da valutare solo se la dashboard "sempre aggiornata"
-  diventa un requisito duro.
+Implementato:
+* `xphone-os/src/Ds3231.{h,cpp}`: driver dedicato a I²C `0x68` sullo stesso bus
+  del gauge, con `Wire.begin()` idempotente per operazione (schema di
+  `BatteryGauge.cpp`). Validità da **OSF** (`0x0F` bit7), control `0x0E = 0x04`,
+  EN32kHz e flag di allarme spenti, 24 ore forzato, temperatura da `0x11-0x12`.
+  La lib `Rtc` del SDK non è stata toccata: parla solo PCF8563 (`REG_TIME` a
+  `0x02`, validità VL, scrittura su `0x0D`) e il profilo `BoardConfig` X3 usa
+  inizializzazione posizionale, quindi modificarlo era il rischio più alto per
+  il guadagno più basso.
+* `ClockStore` diventa l'unico posto dove vive la matematica civile: l'ancora
+  `(day, minutesIntoDay)` è stampata in `anchorMs`, `clockNow()`/
+  `clockFormatTime()`/`clockFormatShortDate()` la srotolano con `millis()`.
+  `ReadingStats` non duplica più gli algoritmi di Hinnant.
+* `main.cpp` semina l'orologio dal DS3231 subito dopo il guard X3 e **prima del
+  primo disegno**, riancorando all'inizio del minuto corrente: statistiche,
+  streak e date funzionano offline e sopravvivono al risveglio (che è un reset).
+* `time.sync` resta l'autorità (fuso e DST li sa solo l'iPhone): riancóra sempre
+  e riscrive il DS3231 quando lo scarto supera il minuto o l'oscillatore era
+  fermo. La latenza `wake → data` ha ora un campo suo (`firstPhoneSyncMs`).
+* Launcher: `hh:mm` in status bar a sinistra del pallino BLE, campionato al
+  ridisegno (su e-ink un tick al minuto costerebbe un flush al minuto).
+* Schermata di sleep: timbro `dorme dalle hh:mm`. Non un orologio: il frame è
+  congelato e nessuna sveglia può ridisegnarlo (§1.8), quindi dice *quando* è
+  stato disegnato — che è anche quanto è vecchia la lista sotto.
+* About: riga `orologio: … (rtc|iPhone)  rtc: ok/OSF/assente` con temperatura —
+  è lo strumento con cui si esegue il test VBAT senza cavo seriale.
 
-*Prova*: device scollegato dal telefono per un giorno che mostra l'ora giusta al risveglio.
+Rinviato di proposito:
+* **Countdown Block ricostruito**: richiede un campo di fine numerico nel
+  protocollo. Parsare `endsAtLabel` fallirebbe proprio in italiano (rischio 7).
+* **Sveglia temporizzata**: non ottenibile in software. I soli GPIO wake-capable
+  del C3 (0-5) sono occupati e a batteria il latch GPIO13 toglie corrente
+  all'MCU; servirebbe un wire-OR di INT/SQW su GPIO3, cioè saldatura.
+
+*Prova*: device scollegato dal telefono per un giorno che mostra l'ora giusta al
+risveglio. Prerequisito: `rtc: ok` (non `OSF`) in About dopo un power-off di
+dieci minuti — è il test del tampone VBAT, che nessuna build può sostituire.
 
 ## v0.5 — Dashboard da scrivania
 

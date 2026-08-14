@@ -27,7 +27,9 @@
 
 #include "BatteryGauge.h"
 #include "BlockStatusStore.h"
+#include "ClockStore.h"
 #include "CompanionSync.h"
+#include "Ds3231.h"
 #include "Fonts.h"
 #include "Gfx.h"
 #include "Input.h"
@@ -150,6 +152,29 @@ static void boot() {
   }
   display.setDisplayX3();
   Serial.println("[lume] boot: Xteink X3 confirmed");
+
+  // Stage 2.1 (v0.4): seed local time from the DS3231 on the sensor bus. It
+  // MUST run here — after detectXteinkIsX3() (which ends with Wire.end()) and
+  // before the first paint, so the launcher clock, the restored scene and the
+  // reader's day attribution are right from the first frame, with no phone in
+  // range. A stopped oscillator (dead/absent backup cell) or an unreadable
+  // chip simply leaves the clock unset: the phone's time.sync then behaves
+  // exactly as it did before this stage existed.
+  {
+    Ds3231::DateTime rtc;
+    if (Ds3231::begin() == Ds3231::Status::Ok && Ds3231::read(rtc) == Ds3231::Status::Ok) {
+      CLOCK_STORE.day = static_cast<uint32_t>(rtc.year) * 10000u +
+                        static_cast<uint32_t>(rtc.month) * 100u + rtc.day;
+      CLOCK_STORE.minutesIntoDay = static_cast<uint16_t>(rtc.hour * 60 + rtc.minute);
+      // Anchor back to the start of the current minute so the rolled-forward
+      // clock does not lag by up to 59 s; never below 0 on an early boot.
+      const uint32_t now = millis();
+      const uint32_t intoMinute = static_cast<uint32_t>(rtc.second) * 1000u;
+      CLOCK_STORE.anchorMs = now > intoMinute ? now - intoMinute : now;
+      CLOCK_STORE.fromRtc = true;
+    }
+  }
+
   // Shared SPI bus, initialized ONCE with the SD card's MISO attached
   // (mirrors x4-os/lib/hal/HalGPIO.cpp:195). Display and SD share SCLK=8 /
   // MOSI=10; SD adds MISO=7 + CS=12 (BoardConfig.h XTEINK_X3/X4 profiles).

@@ -12,10 +12,10 @@
 // includes the fell-asleep tail (bounded by auto-sleep). The band shows pages;
 // minutes ride along in the same records for the app's charts.
 //
-// The device has no RTC: "today" derives from the phone-synced ClockStore
-// (yyyymmdd + minutes-into-day + millis() elapsed since sync). With no sync
-// since boot (day == 0) sessions still update book totals but skip day/streak
-// attribution rather than inventing dates.
+// "Today" derives from ClockStore: the DS3231 seed taken at boot, or the phone's
+// time.sync, rolled forward by millis(). With no clock source since boot
+// (day == 0) sessions still update book totals but skip day/streak attribution
+// rather than inventing dates.
 
 #include <cstdint>
 #include <string>

@@ -23,6 +23,7 @@
 
 #include "../BlockStatusStore.h"
 #include "../ClockStore.h"
+#include "../Ds3231.h"
 #include "../NotificationFilter.h"
 #include "../LumeLocale.h"
 #include "../PrioritiesStore.h"
@@ -191,6 +192,42 @@ class CompanionCardWriteCallbacks final : public BLECharacteristicCallbacks {
  private:
   CompanionBleService& service;
 };
+
+// Phone -> DS3231 writeback. The phone is the reference (time zone, DST); the
+// chip is the flywheel that keeps the date across a wake with no phone in
+// range. Rewrite it only when it actually disagrees: the phone's time.sync has
+// minute resolution, so anything under two minutes of difference is inside the
+// rounding of what we could write back, and rewriting would cost I2C traffic
+// (and a fresh :00 second) for nothing. A stopped oscillator always rewrites.
+void syncRtcFromPhone() {
+  if (CLOCK_STORE.day == 0) return;
+  Ds3231::DateTime rtc;
+  const Ds3231::Status status = Ds3231::read(rtc);
+  if (status == Ds3231::Status::Absent) return;
+
+  const int32_t phoneMinutes = clockSerialFromYmd(CLOCK_STORE.day) * 1440 + CLOCK_STORE.minutesIntoDay;
+  bool rewrite = status != Ds3231::Status::Ok;
+  if (!rewrite) {
+    const uint32_t rtcYmd = static_cast<uint32_t>(rtc.year) * 10000u +
+                            static_cast<uint32_t>(rtc.month) * 100u + rtc.day;
+    const int32_t rtcMinutes = clockSerialFromYmd(rtcYmd) * 1440 + rtc.hour * 60 + rtc.minute;
+    const int32_t drift = phoneMinutes - rtcMinutes;
+    rewrite = drift > 1 || drift < -1;
+  }
+  if (!rewrite) return;
+
+  const uint32_t day = clockYmdFromSerial(phoneMinutes / 1440);
+  Ds3231::DateTime next;
+  next.year = static_cast<uint16_t>(day / 10000u);
+  next.month = static_cast<uint8_t>((day / 100u) % 100u);
+  next.day = static_cast<uint8_t>(day % 100u);
+  next.hour = static_cast<uint8_t>(CLOCK_STORE.minutesIntoDay / 60u);
+  next.minute = static_cast<uint8_t>(CLOCK_STORE.minutesIntoDay % 60u);
+  next.second = 0;
+  const bool written = Ds3231::set(next);
+  LOG_INF("X4CMP", "rtc %s from time.sync: %04u-%02u-%02u %02u:%02u",
+          written ? "written" : "WRITE FAILED", next.year, next.month, next.day, next.hour, next.minute);
+}
 }  // namespace
 
 CompanionBleService COMPANION_BLE;
@@ -843,16 +880,20 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     return true;
   }
   if (std::strcmp(type, "time.sync") == 0) {
-    // Phase 0 morning-meditation spec: the phone is the clock. Stamp only the
-    // FIRST arrival after boot — the wake→date latency is the number under test.
+    // The phone is the reference: only it knows the time zone and DST. Re-anchor
+    // on EVERY sync (a fresh date on the boot anchor would be off by the uptime
+    // since), and keep the first arrival separately as the wake->date latency.
     CLOCK_STORE.day = doc["day"] | 0;
     CLOCK_STORE.minutesIntoDay = doc["minutesIntoDay"] | 0;
-    if (CLOCK_STORE.firstSyncMs == 0) CLOCK_STORE.firstSyncMs = millis();
+    CLOCK_STORE.anchorMs = millis();
+    CLOCK_STORE.fromRtc = false;
+    if (CLOCK_STORE.firstPhoneSyncMs == 0) CLOCK_STORE.firstPhoneSyncMs = CLOCK_STORE.anchorMs;
     LOG_INF("X4CMP", "time.sync day=%lu min=%u connect=%lums sync=%lums",
             static_cast<unsigned long>(CLOCK_STORE.day),
             static_cast<unsigned>(CLOCK_STORE.minutesIntoDay),
             static_cast<unsigned long>(CLOCK_STORE.firstConnectMs),
-            static_cast<unsigned long>(CLOCK_STORE.firstSyncMs));
+            static_cast<unsigned long>(CLOCK_STORE.firstPhoneSyncMs));
+    syncRtcFromPhone();
     return true;
   }
   if (std::strcmp(type, "transfer.start") == 0) {

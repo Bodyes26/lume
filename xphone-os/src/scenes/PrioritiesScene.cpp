@@ -328,8 +328,9 @@ void PrioritiesScene::render(Gfx& gfx) {
 // Static: reads the priorities store directly, shares the checkbox/truncation
 // helpers with render(). Calm composition: centered title + rule, tallies,
 // single-line rows (notes omitted — undone bold, done regular + ticked), and
-// a bottom "moon + xphone" stamp with the wake hint. No RTC on X3/X4, so no
-// "synced Xm ago" line.
+// a bottom "moon + lume" stamp with the wake hint. The frame is frozen until
+// the next wake, so the drawing time is stamped by Sleep::drawSleepScreen
+// rather than a clock that would go stale here.
 bool PrioritiesScene::renderDormant(Gfx& gfx) {
   const int count = static_cast<int>(PRIORITIES_STORE.count());
   if (count == 0) return false;

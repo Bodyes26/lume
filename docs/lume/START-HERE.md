@@ -79,6 +79,15 @@ cd xphone-os
 ```
 
 ```sh
+cd xphone-os
+sh test/host/run.sh
+```
+
+I test host compilano `ClockStore.cpp` e `Ds3231.cpp` con stub di
+Arduino/Wire/BoardConfig: matematica delle date e registri DS3231, in entrambe
+le locale, senza device. Vanno eseguiti prima di ogni flash.
+
+```sh
 cd ios
 export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
 xcodegen generate
@@ -97,4 +106,5 @@ confermato l'hardware.
 
 La localizzazione firmware è a compile time: italiano `lume-x3-it` (default),
 inglese `lume-x3-en`. Build e isolamento dei due binari sono verificati; il
-firmware italiano è stato flashato e validato visivamente sul vero X3.
+firmware italiano è stato flashato e validato visivamente sul vero X3, prima con
+la localizzazione (v0.3) e poi con l'orologio hardware DS3231 (v0.4).

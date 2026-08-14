@@ -6,7 +6,7 @@
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
-**Fase:** localizzazione firmware IT/EN completata; build, isolamento e smoke test italiano su X3 verificati.
+**Fase:** v0.4 orologio hardware DS3231 completata, flashata e accettata sull'X3.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -24,6 +24,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Boot e resa sul vetro pre-i18n | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo prima della localizzazione |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
+| Orologio hardware DS3231 | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 19:22:12`, OSF a 0, secondo boot un minuto dopo, ora coincidente col `time.sync`. Maurizio ha poi confermato vetro e tampone VBAT |
 
 ## Cosa è stato implementato in v0.1
 
@@ -246,19 +247,125 @@ Il 14/08/2026 è stato completato e verificato il secondo flusso reale dell'app:
 Verifiche automatiche: `swift test` con **7/7 PASS** (4 protocollo esistenti +
 3 Today); build Simulator e build firmata iPhone entrambe **BUILD SUCCEEDED**.
 
+## v0.4 — orologio hardware DS3231 (completata e accettata sull'X3)
+
+File toccati:
+
+| File | Cosa |
+|---|---|
+| `xphone-os/src/Ds3231.{h,cpp}` **nuovi** | driver DS3231 a `0x68`: `begin/read/set/oscillatorStopped/readTemperatureTenthsC`, validità da OSF (`0x0F` bit7), control `0x0E = 0x04`, EN32kHz e A1F/A2F spenti, 24 ore forzato, lettura 12 ore convertita |
+| `xphone-os/src/ClockStore.{h,cpp}` | ancora `(day, minutesIntoDay)` + `anchorMs`, `fromRtc`, `firstPhoneSyncMs`; `clockNow`, `clockFormatTime`, `clockFormatShortDate` e la matematica civile condivisa |
+| `xphone-os/src/reader/ReadingStats.{h,cpp}` | rimossa la copia locale degli algoritmi di Hinnant; `todayYmd()` ora è `clockNow()` |
+| `xphone-os/src/main.cpp` | stadio 2.1: seed dal DS3231 dopo il guard X3 e prima del primo disegno, riancorato all'inizio del minuto |
+| `xphone-os/src/ble/CompanionBleService.cpp` | `time.sync` riancóra sempre e scrive il DS3231 se lo scarto supera il minuto o OSF era alto |
+| `xphone-os/src/scenes/LauncherScene.cpp` | `hh:mm` in status bar a sinistra del pallino BLE |
+| `xphone-os/src/Sleep.{h,cpp}` | timbro `dorme dalle hh:mm` sul frame dormiente + commenti "no RTC" corretti |
+| `xphone-os/src/scenes/AboutScene.cpp` | riga `orologio: … (rtc\|iPhone)  rtc: ok/OSF/assente` con temperatura |
+| `xphone-os/src/BlockStatusStore.h`, `scenes/BlockScene.cpp`, `scenes/PrioritiesScene.cpp` | soli commenti: il countdown Block non si ricostruisce perché la fine arriva come stringa localizzata, non perché manchi l'orologio |
+| `xphone-os/test/host/` **nuovo** | suite host (`run.sh`, `clock_test.cpp`, `ds3231_test.cpp`, `ds3231_harness.h`); il workflow di release ora le esegue prima di compilare |
+| `xphone-os/update_it.bin`, `update_en.bin` | rigenerati dalle build qui sotto (file locali: `*.bin` è ignorato da Git) |
+
+Scelta divergente dal piano di [12-rtc-e-solo-x3.md](12-rtc-e-solo-x3.md) §1.9:
+il driver vive in `xphone-os/src/` e usa i pin di `ACTIVE.batteryGauge` (unico
+bus I²C dell'X3), come già fa `BatteryGauge.cpp` per il BQ27220. Non sono stati
+toccati né la lib `Rtc` vendorizzata né il literal **posizionale** del profilo
+`XTEINK_X3` in `BoardConfig.h`, dove un campo fuori posto compila e assegna il
+pin sbagliato (rischio 8 del documento).
+
+Build osservate (`../.venv/bin/pio run -e lume-x3-it -e lume-x3-en`):
+
+| Env | RAM | Flash | `firmware.bin` | SHA-256 |
+|---|---:|---:|---:|---|
+| `lume-x3-it` | 144.996 B | 2.532.233 B | 2.544.768 B | `c482724faf8ad316eb1f0fd335443895f718e4763efacc06856ee5eeb64cfd2c` |
+| `lume-x3-en` | 144.996 B | 2.531.517 B | 2.544.048 B | `db45a80662c7268bf517fd8fd792f19910177c619227d1b593727c5c29f9efc0` |
+
+Delta sulla v0.3: **RAM invariata** (144.996 B), flash +2.384 B (IT) e +2.392 B
+(EN). Nessun warning nuovo: restano solo quelli ereditati (SdFat `#warning`,
+LTRANS seriale).
+
+Verifiche automatiche eseguite con `sh test/host/run.sh` dalla root del modulo
+(le suite vivono in `xphone-os/test/host/`, compilate con `-Wall -Wextra
+-Werror`, nessun warning, 4/4 verdi: clock e rtc in IT e in EN):
+
+* `ClockStore.cpp` con `millis()` stubbato: round-trip seriale civile su 41.000
+  giorni, mezzanotte, 29 febbraio 2028, capodanno, tre giorni di uptime senza
+  sync, e il caso "orologio non impostato". Verde in **entrambe** le locale
+  (`ven 14 ago` / `Fri 14 Aug`).
+* `Ds3231.cpp` contro un register file DS3231 finto (indirizzamento con
+  auto-increment, repeated start, NACK): chip assente → `Absent`; OSF alto →
+  `Invalid` con OSF **preservato** da `begin()`; `begin()` su chip pulito non
+  scrive nulla; `set()` scrive BCD, 24 ore, secolo 0, giorno-settimana 5 per un
+  venerdì e azzera OSF; round-trip identico; registro in 12 ore convertito
+  (19:00, 12 AM → 0, 12 PM → 12); mese 13 rifiutato; temperatura 25,25 °C e
+  −0,25 °C corrette.
+
+Isolamento locale riverificato sui binari: l'immagine IT contiene
+`orologio: …` e `dorme dalle %s`, la EN contiene `clock: …`, `asleep since %s` e
+nessuna stringa italiana. L'unico `Aug` nell'immagine IT è il `__DATE__` della
+libreria Bluetooth vendorizzata (`Aug 25 2025`), non una fuga di traduzione.
+
+### Prova hardware v0.4 — flash e boot verificati il 14/08/2026
+
+`../.venv/bin/pio run -e lume-x3-it -t upload --upload-port /dev/cu.usbmodem11101`:
+scritti 2.544.768 B (1.635.329 compressi), **hash verificato da esptool**, hard
+reset eseguito, `SUCCESS`. La porta USB non compariva finché il device dormiva:
+è il comportamento noto (il deep sleep spegne il CDC), è bastato il risveglio.
+
+Due boot consecutivi catturati via pyserial con pulse DTR/RTS:
+
+```text
+[lume] boot: Xteink X3 confirmed
+[lume] rtc: DS3231 2026-08-14 19:22:12
+...
+[I][X4CMP] time.sync day=20260814 min=1162 connect=2918ms sync=3736ms
+
+[lume] boot: Xteink X3 confirmed
+[lume] rtc: DS3231 2026-08-14 19:23:12
+```
+
+Cosa prova, letteralmente:
+
+* il nuovo stadio gira **dopo il guard X3 e prima dell'inizializzazione del
+  pannello**, come progettato (è la seconda riga del log, prima di `M1 boot`);
+* `begin()` ha restituito `Ok`, quindi **OSF era già a 0**: l'oscillatore non si
+  è mai fermato su questo esemplare — primo segnale concreto che il tampone c'è;
+* il secondo boot legge esattamente un minuto dopo il primo: il chip **conta**,
+  non restituisce un valore fisso plausibile;
+* `min=1162` del `time.sync` è 19:22, cioè l'ora del chip **coincide col telefono
+  al minuto**: il DS3231 di questo X3 teneva già l'ora locale giusta;
+* di conseguenza `syncRtcFromPhone()` ha correttamente **non** riscritto nulla
+  (nessuna riga `rtc written`): il gate sullo scarto funziona. Il ramo di
+  scrittura effettiva resta quindi provato solo dai test host.
+
+**Accettazione sul vetro — confermata da Maurizio il 14/08/2026.** Dopo il flash
+ha provato launcher, About e la schermata di sleep e ha riferito che è tutto a
+posto: `hh:mm` in status bar, la riga `orologio: … rtc: …` in About e il timbro
+`dorme dalle hh:mm` sul frame dormiente. Ha eseguito anche il **test del tampone
+VBAT** (power-off e riapertura di About) senza rilevare problemi, quindi il
+DS3231 di questo esemplare mantiene l'ora anche senza alimentazione principale.
+Nota di precisione: queste ultime conferme sono riferite dall'utente, non
+catturate su seriale come le due righe di boot sopra.
+
+Unico ramo mai eseguito su hardware: la **riscrittura** del chip da `time.sync`,
+perché lo scarto è sempre stato zero. È coperto dai test host (`set()` con BCD,
+24 ore, secolo 0, giorno-settimana e azzeramento di OSF) e si attiverà da solo
+la prima volta che il chip devierà di oltre un minuto o perderà l'oscillatore.
+
 ## Prossime azioni
 
 1. Verificare il recovery del timeout GATT scollegando intenzionalmente il
    device durante una write.
 2. Creare il repository GitHub personale e aggiungerlo come `origin`, mantenendo
    `upstream` fetch-only.
-3. Non anticipare Screen Time: richiede Apple Developer Program a pagamento.
+3. Prossima versione di roadmap: v0.5 dashboard da scrivania, che ora ha l'ora
+   vera come prerequisito soddisfatto ([10-scaletta-fork.md](10-scaletta-fork.md)).
+4. Non anticipare Screen Time: richiede Apple Developer Program a pagamento.
 
 ## Decisioni da non riaprire senza nuova evidenza
 
 Nome Lume; X3-only; tutte e sei le app; italiano/inglese in immagini separate a
 compile time; °C/24h; reader Wi-Fi dall'app; payload JSON compatibile ma
 identità/UUID GATT Lume isolati; HTTP senza token finché il transfer è effimero;
-rollback OTA rinviato; RTC DS3231 previsto; dashboard da scrivania obiettivo
-principale.
+rollback OTA rinviato; RTC DS3231 implementato e accettato in v0.4; dashboard da
+scrivania obiettivo principale.
 Dettagli e fonti: [14-decisioni.md](14-decisioni.md).

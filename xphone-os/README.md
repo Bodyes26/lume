@@ -15,9 +15,10 @@ vendored FreeInk SDK.
 ## Current Lume state (2026-08-14)
 
 Firmware `0.1.0-dev`: X3-only, dedicated `Lume X3` BLE identity, Lume on-glass
-identity, and complete Italian/English compile-time localization. The native
-iOS companion in `../ios/` implements Priorities and Today/EventKit and has
-been verified on the physical iPhone/X3 path.
+identity, complete Italian/English compile-time localization, and the X3's
+DS3231 driven as a real clock. The native iOS companion in `../ios/` implements
+Priorities and Today/EventKit and has been verified on the physical iPhone/X3
+path.
 
 **Product — six focus apps, 3×2 launcher:**
 * **Block** — triggers iOS Screen Time shields via the companion BLE protocol;
@@ -42,10 +43,22 @@ been verified on the physical iPhone/X3 path.
   (with wake/heap/battery diagnostics) lives inside Settings. Camera/Inbox/
   Messages were removed to keep the surface focused.
 
+**Clock (v0.4):** `src/Ds3231.{h,cpp}` reads the DS3231 sitting at I2C 0x68 on
+the gauge's bus — the chip XteinkDetect already fingerprints. `boot()` seeds
+`ClockStore` from it after the X3 guard and before the first paint, so date
+attribution, reading streaks and the launcher's `hh:mm` are right with no phone
+in range; a stopped oscillator (OSF) falls back to waiting for the phone. The
+iPhone's `time.sync` stays the authority (time zone, DST) and rewrites the chip
+when they disagree by more than a minute. About reports `clock:`/`rtc:` (state
+plus die temperature) — that line is how the backup cell gets tested. No timed
+wake: all six wake-capable GPIOs are taken and the battery latch cuts MCU power,
+so the sleep frame is stamped `asleep since hh:mm` instead of pretending to tick
+(`../docs/lume/12-rtc-e-solo-x3.md` §1.8).
+
 **Power model:** press power = sleep (deep sleep, GPIO3 wake); hold 2.5s =
 restart; 10-min idle auto-sleep (2-min during an active block, which does NOT
 pin the device awake — the phone enforces the block). Wake restores the
-last scene (persisted in NVS — RTC memory did NOT survive the X3's power-on-
+last scene (persisted in NVS — RTC *memory* did NOT survive the X3's power-on-
 reset wake). Dormant frame = priorities list + a padlock "Block active until
 …" stamp when a block is running.
 
@@ -55,11 +68,13 @@ while syncing. Per-scene dirty scoping means an unrelated card never repaints
 the current scene.
 
 **Measured localized builds:** both use 144,996 B static RAM (44.2% of
-327,680 B). Italian uses 2,529,849 B flash and produces a 2,542,384 B image;
-English uses 2,529,125 B flash and produces a 2,541,664 B image.
+327,680 B). Italian uses 2,532,233 B flash and produces a 2,544,768 B image;
+English uses 2,531,517 B flash and produces a 2,544,048 B image.
 
 ### Dev workflow
 * Build both locales: `../.venv/bin/pio run -e lume-x3-it -e lume-x3-en`.
+* Host tests (no board, no PlatformIO): `sh test/host/run.sh` — clock/date math
+  and DS3231 register handling, both locales, `-Werror`.
 * **Flash Italian over USB**: `../.venv/bin/pio run -e lume-x3-it -t upload
   --upload-port /dev/cu.usbmodem*`. The X3 needs a 4-pin data pogo cable.
   Deep sleep drops the USB port; press power to wake before flashing.
@@ -76,6 +91,11 @@ English uses 2,529,125 B flash and produces a 2,541,664 B image.
 * **Design first**: `tools/x4-screen-lab` (X3 mode) + `X3-LAYOUT-GUIDE.md`.
 
 ### Known TODOs / open notes
+* **DS3231 backup cell** — checked on Maurizio's unit (v0.4): OSF read 0 at first
+  boot, the chip already held correct local time, and it survived a power-off. On
+  any other unit re-run the test: phone connects (writes the clock) → About shows
+  `rtc: ok` → power off ten minutes → About again. `rtc: OSF (time lost)` means no
+  usable backup cell, and the firmware falls back to waiting for `time.sync`.
 * **Today on-glass validation** — iOS EventKit producer shipped (`TodayManager`);
   confirm Calendar/Reminders grant → sync → day buckets/overdue on device, plus
   wake with the NVS-cached Today card, and the weather band (needs a real

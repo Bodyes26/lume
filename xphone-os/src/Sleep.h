@@ -2,8 +2,9 @@
 
 // xphone-os M4 — power-button deep sleep.
 //
-// sleepNow() paints a minimal sleep screen (FULL refresh — no RTC on X3/X4,
-// so the glass shows a static wordmark, not a clock), tears the radios and
+// sleepNow() paints a minimal sleep screen (FULL refresh — a frozen frame with
+// the "asleep since hh:mm" stamp, since nothing can repaint it until you press
+// power: see drawSleepScreen), tears the radios and
 // panel down, arms the power button as the ESP32-C3 deep-sleep GPIO wakeup
 // (esp_deep_sleep_enable_gpio_wakeup — the C3 has no ext0/ext1; pattern from
 // x4-os lib/hal/HalPowerManager.cpp:63-95) and calls esp_deep_sleep_start().
