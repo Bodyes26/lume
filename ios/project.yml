@@ -24,6 +24,7 @@ targets:
           - Resources/Info.plist
           - Resources/Assets.xcassets
     resources:
+      - path: Lume/Resources/AppIcon.icon
       - path: Lume/Resources/AppIcon60@2x.png
       - path: Lume/Resources/AppIcon60@3x.png
     info:

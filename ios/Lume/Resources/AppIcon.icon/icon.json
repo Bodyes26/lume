@@ -1,0 +1,130 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.91441,1.00000,0.71454,1.00000",
+      "display-p3:0.96783,0.88218,0.89410,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode" : "normal",
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "display-p3:0.00000,0.00000,0.00000,0.25938"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "linear-gradient" : [
+                  "display-p3:0.88577,0.88577,0.88577,1.00000",
+                  "display-p3:0.78136,0.78136,0.78136,1.00000"
+                ]
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "05_OrientationCorona.svg",
+          "name" : "05_OrientationCorona"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "display-p3:0.96783,0.67496,0.22240,0.87447"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:1.00000,0.71129,0.24545,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "04_LighthouseStar.svg",
+          "name" : "04_LighthouseStar"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "linear-gradient" : [
+                  "display-p3:1.00000,0.81408,0.32863,1.00000",
+                  "display-p3:0.00000,0.00000,0.00000,0.62051"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0.5,
+                    "y" : 0
+                  },
+                  "stop" : {
+                    "x" : 0.5,
+                    "y" : 0.5
+                  }
+                }
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "linear-gradient" : [
+                  "display-p3:1.00000,0.81408,0.32863,1.00000",
+                  "display-p3:1.00000,1.00000,1.00000,0.85247"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0.5,
+                    "y" : 0
+                  },
+                  "stop" : {
+                    "x" : 0.5,
+                    "y" : 0.5
+                  }
+                }
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "03_LighthouseTower.svg",
+          "name" : "03_LighthouseTower"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "display-p3:0.15334,0.96783,0.52082,0.12240"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.15198,1.00000,0.54190,0.98307"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "02_Horizon.svg",
+          "name" : "02_Horizon"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
