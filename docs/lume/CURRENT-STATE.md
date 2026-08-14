@@ -26,7 +26,7 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
 | App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; Priorities bidirezionale, Today/EventKit, reconnect e nuova icona riusciti |
 | Orologio hardware DS3231 | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 19:22:12`, OSF a 0, secondo boot un minuto dopo, ora coincidente col `time.sync`. Maurizio ha poi confermato vetro e tampone VBAT |
-| Promemoria iOS (sostituisce Priorities) | **IMPLEMENTATA, BUILD + TEST VERDI** | Firmware IT/EN SUCCESS (RAM 148.484 B, +3.488 B), 4 test host C++ verdi, 8 test Swift host verdi (Today + LumeProtocol), build iOS xcodebuild SUCCEEDED. Manca il flash/test hardware |
+| Promemoria iOS (sostituisce Priorities) | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 21:43:12`, `time.sync min=1303` (21:43), BLE link cifrato/bonded, ANCS attivo, loop e refresh stabili |
 
 ## Cosa è stato implementato in v0.1
 
@@ -385,6 +385,24 @@ interamente visibile; le etichette dell'anteprima Icon style allineate alle icon
 l'hint di Workout; e — con un `.bin` volutamente non valido in Settings →
 aggiornamento firmware — i tasti che rispondono di nuovo dopo la X di errore, che
 è la prova del `resumeTask()`.
+
+### Prova hardware Promemoria iOS — flash e boot verificati il 14/08/2026
+
+Firmware `lume-x3-it` con `RemindersStore` caricato via USB (hash verificato):
+
+```text
+[lume] boot: Xteink X3 confirmed
+[lume] rtc: DS3231 2026-08-14 21:43:12
+...
+[I][X4CMP] Card received id=today-sync-1786717487 ... rem=0
+[I][X4CMP] BLE authentication complete conn=1 encrypted=1 bonded=1
+[I][X4CMP] time.sync day=20260814 min=1303 connect=3167ms sync=3892ms
+...
+[xphone-os] draw=17ms refresh=3279ms tier=FULL sinceScrub=0
+[xphone-os] draw=29ms refresh=450ms tier=FAST sinceScrub=1
+```
+
+Heap stabile: 119.052 B liberi all'avvio, 34.804 B blocco massimo contiguo dopo la connessione BLE (ampiamente sufficiente per il dizionario del reader da 32 KB).
 
 ## Prossime azioni
 
