@@ -373,11 +373,17 @@ Verifica: `sh test/host/run.sh` 4/4 verde, `pio run -e lume-x3-it -e lume-x3-en`
 SUCCESS. **RAM invariata** a 144.996 B; flash 2.532.765 B (IT) e 2.532.049 B (EN),
 cioè +532 B su ciascuna rispetto alla sola v0.4. Nessun warning nuovo.
 
-Da guardare sul vetro al prossimo flash: le due pagine di About con `PREC`/`SUCC`
-e la riga finale interamente visibile; le etichette dell'anteprima Icon style
-allineate alle icone; l'hint di Workout; e — con un `.bin` volutamente non valido
-in Settings → aggiornamento firmware — i tasti che rispondono di nuovo dopo la X
-di errore, che è la prova del `resumeTask()`.
+L'immagine è stata flashata sull'X3 (hash verificato) e il boot è stato catturato
+su seriale: `[lume] rtc: DS3231 2026-08-14 19:50:22`, `time.sync` a `min=1190`
+(19:50, ancora concorde al minuto), card `today-sync` e `prio-persist` ricevute e
+applicate dal **nuovo percorso di clipping UTF-8** senza errori, loop stabile
+(`FULL 3272 ms`, poi `FAST 449 ms`), heap invariata a 122.392 B liberi al boot.
+
+Da guardare sul vetro: le due pagine di About con `PREC`/`SUCC` e la riga finale
+interamente visibile; le etichette dell'anteprima Icon style allineate alle icone;
+l'hint di Workout; e — con un `.bin` volutamente non valido in Settings →
+aggiornamento firmware — i tasti che rispondono di nuovo dopo la X di errore, che
+è la prova del `resumeTask()`.
 
 ## Prossime azioni
 
