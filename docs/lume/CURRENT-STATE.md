@@ -6,6 +6,7 @@
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
+**Commit orologio DS3231 (v0.4):** `b2a515e`  
 **Fase:** v0.4 orologio hardware DS3231 completata, flashata e accettata sull'X3.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
