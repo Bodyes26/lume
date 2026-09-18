@@ -1,13 +1,13 @@
 # Lume — stato operativo e handoff
 
-**Aggiornato:** 14 agosto 2026  
+**Aggiornato:** 19 agosto 2026  
 **Versione firmware:** `0.1.0-dev`  
 **Versione app iOS:** `0.2.0-dev`  
 **Base upstream:** `andrewjiang/flowe-os@3101448b02362e627cb17c4de863c1ed22d2478d` (`fw-v0.5.0`)  
 **Commit vertical slice Priorities:** `75639a3`  
 **Commit Today/EventKit + icona:** `90777cf`  
 **Commit orologio DS3231 (v0.4):** `b2a515e`  
-**Fase:** integrazione Promemoria iOS completata su firmware e app: RemindersStore, RemindersScene con schede, Today solo agenda, nuovo poster di sleep; build IT/EN e 8 test Swift host tutti verdi.
+**Fase:** Sistema di giochi narrativi Trail (motore narrativo, micro-VM minigiochi, 3 storie compilate, integrazione iOS e persistenza NVS) implementato, verificato con 100% test host PASS e flashato sull'X3 fisico.
 
 Questo file descrive soltanto lavoro realmente osservato. Per riprendere da una nuova
 sessione, partire da [START-HERE.md](START-HERE.md).
@@ -24,10 +24,11 @@ sessione, partire da [START-HERE.md](START-HERE.md).
 | Localizzazione firmware | **VERIFICATA SU HARDWARE** | `lume-x3-it` caricato via USB sull'X3; boot, launcher, Impostazioni, una scena applicativa, soft-key e glifi accentati confermati corretti dall'utente; `lume-x3-en` verificato a build e isolamento binario |
 | Boot e resa sul vetro pre-i18n | **VERIFICATA DALL'UTENTE** | Maurizio ha provato le schermate e confermato il funzionamento complessivo prima della localizzazione |
 | BLE/ANCS reale v0.1 | **VERIFICATA** | nome advertising `Lume X3`; notifica WhatsApp ricevuta e renderizzata |
-| App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27; nuova versione con integrazione Promemoria nativi installata e avviata su device |
+| App iOS Lume | **VERIFICATA SU HARDWARE** | build firmata su iPhone 16 Pro/iOS 27 (`5E5E2A8C-EED2-56EE-8449-B0EB114F831A`); nuova versione con sezione Avventure (Trail) installata e avviata su device fisico |
 | Orologio hardware DS3231 | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 19:22:12`, OSF a 0, secondo boot un minuto dopo, ora coincidente col `time.sync`. Maurizio ha poi confermato vetro e tampone VBAT |
 | Promemoria iOS (sostituisce Priorities) | **VERIFICATA SU HARDWARE** | `lume-x3-it` flashato sull'X3: `[lume] rtc: DS3231 2026-08-14 21:43:12`, `time.sync min=1303` (21:43), BLE link cifrato/bonded, ANCS attivo, loop e refresh stabili |
-
+| Giochi (Sudoku, Nonogram, Campo minato) | **VERIFICATA SU HARDWARE** | `lume-x3-it` compilato e flashato via USB su `/dev/cu.usbmodem13101`; 7ª tile nel launcher; 14/14 test host PASS; 35 frame grafici verificati |
+| Sistema Trail (Avventure narrative & Minigiochi) | **VERIFICATA SU HARDWARE** | `lume-x3-it` compilato e flashato via USB su `/dev/cu.usbmodem13101`; 4ª voce nel menu Giochi; micro-VM con 40+ opcode (60/60 test PASS); TrailEngine (53/53 test PASS); 3 storie complete create e compilate (La Via della Seta incorporata in flash, Orizzonti Stellari, L'Ultimo Faro); sezione Avventure nell'app iOS (14/14 test PASS) |
 ## Cosa è stato implementato in v0.1
 
 ### Fork e continuità

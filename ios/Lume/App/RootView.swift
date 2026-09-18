@@ -3,7 +3,9 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var bluetooth: LumeBluetoothManager
     @ObservedObject var reminders: RemindersStore
+    @ObservedObject var sleep: SleepStore
     @ObservedObject var today: TodayStore
+    @ObservedObject var trail: TrailStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -25,6 +27,23 @@ struct RootView: View {
                         store: reminders,
                         isDeviceReady: bluetooth.phase.isReady,
                         onSync: bluetooth.syncReminders
+                    )
+                    Divider().overlay(LumeTheme.hairline)
+                    SleepScreenView(
+                        store: sleep,
+                        today: today,
+                        reminders: reminders,
+                        isDeviceReady: bluetooth.phase.isReady,
+                        onSync: { config in
+                            bluetooth.syncSleepConfig(config)
+                            sleep.markSyncCompleted()
+                        }
+                    )
+                    Divider().overlay(LumeTheme.hairline)
+                    TrailView(
+                        store: trail,
+                        isDeviceReady: bluetooth.phase.isReady,
+                        onSyncCatalog: bluetooth.syncTrailCatalog
                     )
                 }
                 .padding(.horizontal, LumeSpace.medium)

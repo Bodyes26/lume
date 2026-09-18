@@ -30,6 +30,7 @@
 #include "../WorkoutStore.h"
 #include "../TodayStore.h"
 #include "../net/WifiCreds.h"
+#include "../SleepConfigStore.h"
 #include "BleShim.h"
 #include "CompanionAncsClient.h"
 #include "Utf8Clip.h"
@@ -904,6 +905,23 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     const bool ok = WifiCreds::save(ssid, password);
     LOG_INF("X4CMP", "Wi-Fi creds %s (ssid=%s)", ok ? "saved" : "SAVE FAILED", ssid);
     sendTransferStatus(ok ? "wifi-saved" : "wifi-error", nullptr, ssid);
+    return ok;
+  }
+  if (std::strcmp(type, "sleep.config") == 0 || std::strcmp(type, "sleep.settings") == 0) {
+    const uint8_t face = doc["face"] | (doc["mode"] | 0);
+    const char* title = doc["title"] | "";
+    const char* quote = doc["quote"] | "";
+    const char* author = doc["author"] | "";
+    const bool showBattery = doc["battery"] | (doc["batt"] | true);
+    const bool showTemperature = doc["temp"] | (doc["temperature"] | true);
+    const bool showNextEvent = doc["event"] | (doc["nextEvent"] | true);
+    const bool showReadingStats = doc["stats"] | (doc["readingStats"] | true);
+    const bool showSleepTime = doc["stamp"] | (doc["sleepTime"] | true);
+
+    const bool ok = SLEEP_CONFIG.update(face, title, quote, author, showBattery, showTemperature,
+                                        showNextEvent, showReadingStats, showSleepTime);
+    LOG_INF("X4CMP", "Sleep config applied face=%u ok=%d", face, ok ? 1 : 0);
+    setStatus(L10N("Sleep settings saved", "Impostazioni sleep salvate"));
     return ok;
   }
 

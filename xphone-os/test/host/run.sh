@@ -26,4 +26,31 @@ for locale in IT EN; do
   c++ $CXXFLAGS $flag -Istubs/rtc -I. ds3231_test.cpp "$SRC/ClockStore.cpp" -o "$OUT/rtc_$locale"
   printf '%s ' "$locale"
   "$OUT/rtc_$locale"
+  c++ $CXXFLAGS $flag -Istubs/sleep_config sleep_config_test.cpp "$SRC/SleepConfigStore.cpp" -o "$OUT/sleep_config_$locale"
+  printf '%s ' "$locale"
+  "$OUT/sleep_config_$locale"
+
+  c++ $CXXFLAGS $flag mines_test.cpp -o "$OUT/mines_$locale"
+  printf '%s ' "$locale"
+  "$OUT/mines_$locale"
+
+  c++ $CXXFLAGS $flag sudoku_test.cpp -o "$OUT/sudoku_$locale"
+  printf '%s ' "$locale"
+  "$OUT/sudoku_$locale"
+
+  c++ $CXXFLAGS $flag nonogram_test.cpp -o "$OUT/nonogram_$locale"
+  printf '%s ' "$locale"
+  "$OUT/nonogram_$locale"
+
+  c++ $CXXFLAGS $flag -Istubs/sleep_config game_stats_test.cpp -o "$OUT/game_stats_$locale"
+  printf '%s ' "$locale"
+  "$OUT/game_stats_$locale"
+
+  c++ $CXXFLAGS $flag trail_vm_test.cpp -o "$OUT/trail_vm_$locale"
+  printf '%s ' "$locale"
+  "$OUT/trail_vm_$locale"
+
+  c++ $CXXFLAGS $flag -Istubs/sleep_config trail_engine_test.cpp -o "$OUT/trail_engine_$locale"
+  printf '%s ' "$locale"
+  "$OUT/trail_engine_$locale"
 done

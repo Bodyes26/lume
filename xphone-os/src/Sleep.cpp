@@ -9,6 +9,7 @@
 #include <Wire.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "esp_system.h"
 
@@ -31,6 +32,11 @@
 #include "scenes/WorkoutScene.h"
 #include "WorkoutStore.h"
 #include <ArduinoJson.h>
+#include "BatteryGauge.h"
+#include "Ds3231.h"
+#include "SleepConfigStore.h"
+#include "art/LumeMark.h"
+#include "reader/ReadingStats.h"
 
 namespace {
 
@@ -96,52 +102,332 @@ uint8_t gTombScratch[NotificationStore::TOMBSTONE_CAPACITY * sizeof(Notification
 // drawn — honest, and it tells you how stale the list under it is — instead of
 // a clock that would be wrong the moment you look at it.
 // ---------------------------------------------------------------------------
+bool nextTimedEvent(TodayStore::Item& out) {
+  for (std::size_t i = 0; i < TODAY_STORE.count(); i++) {
+    if (!TODAY_STORE.get(i, out)) continue;
+    if (!out.time[0] || strcmp(out.time, "All day") == 0) continue;
+    return true;
+  }
+  return false;
+}
+
+void drawSleepHeader(Gfx& gfx, const SleepConfig& cfg, const char* defaultTitle) {
+  const int w = gfx.width();
+  const int leftX = 24;
+  const int rightX = w - 24;
+  const int y = 14;
+
+  const char* title = (cfg.customTitle[0] != '\0') ? cfg.customTitle : defaultTitle;
+  gfx.drawText(kFontSmall, leftX, y, title);
+
+  // Telemetry string: [temp] [battery] [timestamp]
+  char statusBuf[64] = {0};
+  int pos = 0;
+
+  if (cfg.showTemperature) {
+    int16_t tenths = 0;
+    if (Ds3231::readTemperatureTenthsC(tenths)) {
+      pos += snprintf(statusBuf + pos, sizeof(statusBuf) - pos, "%d,%d C  ", tenths / 10, std::abs(tenths % 10));
+    }
+  }
+
+  if (cfg.showBattery) {
+    uint16_t soc = 0;
+    if (BatteryGauge::readWord(BatteryGauge::kCmdStateOfCharge, soc) && soc <= 100) {
+      pos += snprintf(statusBuf + pos, sizeof(statusBuf) - pos, "%u%%  ", static_cast<unsigned>(soc));
+    }
+  }
+
+  if (cfg.showSleepTime) {
+    char clock[16];
+    if (clockFormatTime(clock, sizeof(clock))) {
+      snprintf(statusBuf + pos, sizeof(statusBuf) - pos, L10N("asleep %s", "dorme %s"), clock);
+    }
+  }
+
+  if (statusBuf[0] != '\0') {
+    const int statW = gfx.textWidth(kFontSmall, statusBuf);
+    gfx.drawText(kFontSmall, rightX - statW, y, statusBuf);
+  }
+
+  gfx.drawLine(leftX, 42, rightX, 42, 1, true);
+}
+
+void renderFaceDashboard(Gfx& gfx, const SleepConfig& cfg) {
+  const int w = gfx.width();
+  const int cx = w / 2;
+  drawSleepHeader(gfx, cfg, "LUME");
+
+  // Date hero
+  char dateBuf[48] = {0};
+  if (clockFormatShortDate(dateBuf, sizeof(dateBuf))) {
+    gfx.drawTextCentered(kFontBold, cx, 56, dateBuf);
+    gfx.fillRect(cx - 28, 90, 56, 2, true);
+  }
+
+  int curY = 104;
+
+  // Next Calendar Event (if available and enabled)
+  if (cfg.showNextEvent) {
+    TodayStore::Item item;
+    if (nextTimedEvent(item)) {
+      const int boxX = 24;
+      const int boxW = w - 48;
+      const int boxH = 56;
+      gfx.drawRoundedRect(boxX, curY, boxW, boxH, 6, 1, true);
+
+      // Inverted time pill
+      const int pillW = gfx.textWidth(kFontSmall, item.time) + 16;
+      const int pillH = 22;
+      gfx.fillRoundedRect(boxX + 12, curY + 8, pillW, pillH, 4, true);
+      gfx.drawText(kFontSmall, boxX + 20, curY + 8, item.time, false);
+
+      // Title & Subtitle
+      gfx.drawText(kFontBold, boxX + 12 + pillW + 12, curY + 8, item.title);
+      if (item.subtitle[0] != '\0') {
+        gfx.drawText(kFontSmall, boxX + 12, curY + 34, item.subtitle);
+      }
+      curY += boxH + 16;
+    }
+  }
+
+  // Priority Reminders List
+  const std::size_t remCount = REMINDERS_STORE.count();
+  const char* listName = REMINDERS_STORE.listCount() > 0 ? REMINDERS_STORE.listName(0) : "PROMEMORIA";
+  char secHeader[64];
+  if (remCount > 0) {
+    snprintf(secHeader, sizeof(secHeader), "%s (%u)", listName, static_cast<unsigned>(remCount));
+  } else {
+    snprintf(secHeader, sizeof(secHeader), "%s", listName);
+  }
+  gfx.drawText(kFontSmall, 28, curY, secHeader);
+  curY += 26;
+
+  if (remCount > 0) {
+    const std::size_t maxToShow = (curY > 160) ? 4 : 6;
+    const std::size_t toDraw = std::min(remCount, maxToShow);
+    for (std::size_t i = 0; i < toDraw; ++i) {
+      RemindersStore::Item item;
+      if (!REMINDERS_STORE.get(i, item)) break;
+
+      // Checkbox
+      gfx.drawRect(28, curY + 4, 16, 16, 2, true);
+
+      // Title
+      gfx.drawText(kFontRegular, 52, curY, item.title);
+
+      // Due tag if present
+      if (item.due[0] != '\0') {
+        const int dueW = gfx.textWidth(kFontSmall, item.due);
+        gfx.drawText(kFontSmall, w - 28 - dueW, curY + 2, item.due);
+      }
+      curY += 34;
+    }
+  } else {
+    gfx.drawText(kFontRegular, 28, curY, L10N("No pending reminders", "Nessun promemoria in sospeso"));
+    curY += 34;
+  }
+
+  // Bottom block/ambient line
+  int slotY = gfx.height() - 96;
+  if (!RemindersScene::renderDormantBlockLine(gfx, slotY) && cfg.showReadingStats) {
+    const auto band = reader::ReadingStats::band();
+    if (band.todayPages > 0 || band.streakDays > 0) {
+      char statLine[64];
+      snprintf(statLine, sizeof(statLine), L10N("%u pages today | %u day streak", "%u pag oggi | %u gg di fila"),
+               static_cast<unsigned>(band.todayPages), static_cast<unsigned>(band.streakDays));
+      gfx.drawTextCentered(kFontSmall, cx, slotY, statLine);
+    }
+  }
+
+  gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 48,
+                       L10N("press power to wake", "premi accensione per risvegliare"));
+}
+
+void renderFaceReader(Gfx& gfx, const SleepConfig& cfg) {
+  const int w = gfx.width();
+  const int cx = w / 2;
+  drawSleepHeader(gfx, cfg, L10N("READING", "IN LETTURA"));
+
+  // Check last read book path from Preferences
+  char bookPath[96] = {0};
+  {
+    Preferences prefs;
+    if (prefs.begin(kPrefsNamespace, /*readOnly=*/true)) {
+      prefs.getString("lastBook", bookPath, sizeof(bookPath));
+      prefs.end();
+    }
+  }
+
+  const char* base = bookPath[0] ? bookPath : "Lume E-Reader";
+  const char* lastSlash = strrchr(base, '/');
+  if (lastSlash) base = lastSlash + 1;
+  char titleBuf[64] = {0};
+  snprintf(titleBuf, sizeof(titleBuf), "%s", base);
+  char* dot = strrchr(titleBuf, '.');
+  if (dot && (strcmp(dot, ".epub") == 0 || strcmp(dot, ".EPUB") == 0)) {
+    *dot = '\0';
+  }
+  for (char* p = titleBuf; *p; ++p) {
+    if (*p == '_') *p = ' ';
+  }
+
+  gfx.drawTextCentered(kFontBold, cx, 80, titleBuf);
+  gfx.fillRect(cx - 32, 116, 64, 2, true);
+
+  // Reading Stats
+  const auto band = reader::ReadingStats::band();
+  char statsBanner[64];
+  snprintf(statsBanner, sizeof(statsBanner), L10N("Today: %u pages  |  Streak: %u days", "Oggi: %u pagine  |  Serie: %u giorni"),
+           static_cast<unsigned>(band.todayPages), static_cast<unsigned>(band.streakDays));
+  gfx.drawTextCentered(kFontRegular, cx, 136, statsBanner);
+
+  // 7-day spark dots
+  const char* dayLabels[7] = {L10N("M", "L"), L10N("T", "M"), L10N("W", "M"), L10N("T", "G"),
+                              L10N("F", "V"), L10N("S", "S"), L10N("S", "D")};
+  const int dotSpacing = 36;
+  const int dotStartX = cx - (3 * dotSpacing);
+  const int dotY = 176;
+  for (int d = 0; d < 7; ++d) {
+    const int dx = dotStartX + d * dotSpacing;
+    gfx.drawTextCentered(kFontSmall, dx, dotY - 18, dayLabels[d]);
+    if (band.weekPages[d] > 0) {
+      gfx.fillRoundedRect(dx - 5, dotY, 10, 10, 5, true);
+    } else {
+      gfx.drawRoundedRect(dx - 5, dotY, 10, 10, 5, 1, true);
+    }
+  }
+
+  // Quote or Literary Note
+  const char* quote = cfg.customQuote[0] ? cfg.customQuote
+                                         : L10N("A reader lives a thousand lives before he dies.",
+                                                 "Un lettore vive mille vite prima di morire.");
+  const char* author = cfg.customAuthor[0] ? cfg.customAuthor
+                                           : L10N("George R.R. Martin", "George R.R. Martin");
+
+  const int quoteBoxY = 240;
+  gfx.drawRoundedRect(28, quoteBoxY, w - 56, 260, 8, 1, true);
+
+  gfx.drawText(kFontBold, 44, quoteBoxY + 16, L10N("\"", "\xC2\xAB"));
+  gfx.drawTextWrapped(kFontRegular, 56, quoteBoxY + 28, quote, w - 112, 6, true);
+  char authorLine[64];
+  snprintf(authorLine, sizeof(authorLine), "-- %s", author);
+  const int authorW = gfx.textWidth(kFontSmall, authorLine);
+  gfx.drawText(kFontSmall, w - 56 - authorW - 10, quoteBoxY + 220, authorLine);
+
+  if (cfg.showNextEvent) {
+    RemindersScene::renderDormantFooter(gfx, gfx.height() - 96);
+  }
+
+  gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 48,
+                       L10N("press power to wake", "premi accensione per risvegliare"));
+}
+
+void renderFaceQuote(Gfx& gfx, const SleepConfig& cfg) {
+  const int w = gfx.width();
+  const int cx = w / 2;
+  drawSleepHeader(gfx, cfg, L10N("QUOTE", "CITAZIONE"));
+
+  char dateBuf[48] = {0};
+  if (clockFormatShortDate(dateBuf, sizeof(dateBuf))) {
+    gfx.drawTextCentered(kFontSmall, cx, 68, dateBuf);
+    gfx.fillRect(cx - 24, 94, 48, 1, true);
+  }
+
+  const char* quote = cfg.customQuote[0] ? cfg.customQuote
+                                         : L10N("Simplicity is the ultimate sophistication.",
+                                                "La semplicita e la suprema sofisticazione.");
+  const char* author = cfg.customAuthor[0] ? cfg.customAuthor
+                                           : L10N("Leonardo da Vinci", "Leonardo da Vinci");
+
+  const int quoteY = 160;
+  gfx.drawTextCentered(kFontBold, cx, quoteY, L10N("\"", "\xC2\xAB"));
+  gfx.drawTextWrapped(kFontBold, 48, quoteY + 36, quote, w - 96, 8, true);
+
+  char authorLine[64];
+  snprintf(authorLine, sizeof(authorLine), "-- %s", author);
+  gfx.drawTextCentered(kFontRegular, cx, quoteY + 260, authorLine);
+
+  if (cfg.showNextEvent) {
+    RemindersScene::renderDormantFooter(gfx, gfx.height() - 96);
+  }
+
+  gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 48,
+                       L10N("press power to wake", "premi accensione per risvegliare"));
+}
+
+void renderFaceMinimal(Gfx& gfx, const SleepConfig& cfg) {
+  const int w = gfx.width();
+  const int cx = w / 2;
+  drawSleepHeader(gfx, cfg, "LUME");
+
+  // Center Lume Emblem
+  drawLumeMark(gfx, cx, 190, 120);
+
+  // Centered Wordmark
+  gfx.drawTextCentered(kFontBold, cx, 330, "lume");
+  gfx.fillRect(cx - 28, 368, 56, 2, true);
+
+  // Date line
+  char dateBuf[48] = {0};
+  if (clockFormatShortDate(dateBuf, sizeof(dateBuf))) {
+    gfx.drawTextCentered(kFontRegular, cx, 396, dateBuf);
+  }
+
+  if (cfg.showNextEvent) {
+    RemindersScene::renderDormantFooter(gfx, gfx.height() - 96);
+  }
+
+  gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 48,
+                       L10N("press power to wake", "premi accensione per risvegliare"));
+}
+
 void drawSleepScreen(Gfx& gfx) {
   gfx.clear();
+  SLEEP_CONFIG.load();
+  const SleepConfig& cfg = SLEEP_CONFIG.config();
 
-  char clock[16];
-  if (clockFormatTime(clock, sizeof(clock))) {
-    char stamp[32];
-    snprintf(stamp, sizeof(stamp), L10N("asleep since %s", "dorme dalle %s"), clock);
-    gfx.drawText(kFontSmall, gfx.width() - 16 - gfx.textWidth(kFontSmall, stamp), 12, stamp);
+  SleepFace activeFace = cfg.face;
+  if (activeFace == SleepFace::Auto) {
+    if (gCurrentSceneId == SceneId::Workout && WorkoutScene::renderDormant(gfx)) {
+      int slotY = gfx.height() - 108;
+      if (RemindersScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
+      RemindersScene::renderDormantFooter(gfx, slotY);
+      gfx.drawTextCentered(kFontSmall, gfx.width() / 2, gfx.height() - 56,
+                           L10N("press power to wake", "premi accensione"));
+      gfx.display().requestResync(1);
+      gfx.flush(EInkDisplay::FULL_REFRESH);
+      return;
+    } else if (gCurrentSceneId == SceneId::Reader) {
+      activeFace = SleepFace::Reader;
+    } else {
+      activeFace = SleepFace::Dashboard;
+    }
   }
 
-  // Sleeping FROM the Workout scene: the workout list replaces the priorities
-  // list; the footer stack (calendar + block + wake hint) stays identical so
-  // all sleep faces read as one design.
-  if (gCurrentSceneId == SceneId::Workout && WorkoutScene::renderDormant(gfx)) {
-    int slotY = gfx.height() - 108;
-    if (RemindersScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    RemindersScene::renderDormantFooter(gfx, slotY);
-    gfx.drawTextCentered(kFontSmall, gfx.width() / 2, gfx.height() - 56,
-                         L10N("press power to wake", "premi accensione"));
-  } else if (!RemindersScene::renderDormant(gfx)) {
-    const int cx = gfx.width() / 2;
-    const int wordmarkY = gfx.height() * 2 / 5;
-    gfx.drawTextCentered(kFontBold, cx, wordmarkY, "lume");
-
-    // Short 2px rule under the wordmark (same rule style as AboutScene).
-    constexpr int kRuleW = 56;
-    const int ruleY = wordmarkY + gfx.lineHeight(kFontBold) + 10;
-    gfx.fillRect(cx - kRuleW / 2, ruleY, kRuleW, 2, true);
-
-    // M5 sleep redesign: centered footer stack — calendar line, block line,
-    // wake hint — the same chrome the priorities frame draws, so both sleep
-    // faces read as one design.
-    (void)ruleY;
-    int slotY = gfx.height() - 108;
-    if (RemindersScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    RemindersScene::renderDormantFooter(gfx, slotY);
-
-    gfx.drawTextCentered(kFontSmall, cx, gfx.height() - 56,
-                         L10N("press power to wake", "premi accensione"));
+  switch (activeFace) {
+    case SleepFace::Dashboard:
+      renderFaceDashboard(gfx, cfg);
+      break;
+    case SleepFace::Reader:
+      renderFaceReader(gfx, cfg);
+      break;
+    case SleepFace::Reminders:
+      if (!RemindersScene::renderDormant(gfx)) {
+        renderFaceDashboard(gfx, cfg);
+      }
+      break;
+    case SleepFace::Quote:
+      renderFaceQuote(gfx, cfg);
+      break;
+    case SleepFace::Minimal:
+      renderFaceMinimal(gfx, cfg);
+      break;
+    default:
+      renderFaceDashboard(gfx, cfg);
+      break;
   }
-  // Ghost scrub: auto-sleep fires after minutes of an unchanged, differential-
-  // refreshed image, and one FULL inversion pass can leave a faint imprint of
-  // it behind the dormant frame. Boot conditioning runs TWO full syncs for the
-  // same reason (Uc8253X3Driver::begin, _initialFullSyncsRemaining = 2), so
-  // mirror it here: requestResync(1) makes this FULL run as a forced full sync
-  // plus one post-condition pass with the OEM _normal bank. No-op on X4.
+
   gfx.display().requestResync(1);
   gfx.flush(EInkDisplay::FULL_REFRESH);
 }
@@ -214,6 +500,10 @@ void sleepNow(Gfx& gfx, Input& input) {
   // panel paints, and the sampling task must stop before deep-sleep teardown
   // (wake is a full power-on reset, so no resume needed).
   WorkoutScene::flushPendingSend();  // coalesced workout.set must not die with the loop
+  // Same rationale, higher stakes: an in-progress DAILY board that dies with the
+  // loop is the one thing the player cannot regenerate — tomorrow hands out a
+  // different puzzle. No-op unless a game scene is on glass.
+  gamesPersistDaily();
   SCENES.waitFlushIdle();
   input.suspendTask();
   Serial.println("[xphone-os] entering deep sleep");

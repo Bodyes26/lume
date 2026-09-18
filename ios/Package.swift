@@ -21,13 +21,18 @@ let package = Package(
                 "Features/Reminders/ReminderListSelectionView.swift",
                 "Features/Today/TodayStore.swift",
                 "Features/Today/TodayView.swift",
+                "Features/Sleep",
+                "Features/Trail/TrailStore.swift",
+                "Features/Trail/TrailStoryCard.swift",
+                "Features/Trail/TrailView.swift",
                 "Resources"
             ],
             sources: [
                 "Bluetooth/LumeProtocol.swift",
                 "Features/Reminders/ReminderItem.swift",
                 "Features/Today/TodayEntry.swift",
-                "Features/Today/TodayProjection.swift"
+                "Features/Today/TodayProjection.swift",
+                "Features/Trail/TrailStoryInfo.swift"
             ]
         ),
         .testTarget(

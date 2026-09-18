@@ -8,7 +8,90 @@ struct LumeDeviceAction: Decodable, Equatable, Sendable {
     let sequence: UInt32?
     let gen: UInt16?
     let handle: UInt16?
+    let storyId: String?
+    let chapter: Int?
+    let save: String?
+
+    init(
+        schemaVersion: Int = 1,
+        type: String,
+        id: String? = nil,
+        done: Bool? = nil,
+        sequence: UInt32? = nil,
+        gen: UInt16? = nil,
+        handle: UInt16? = nil,
+        storyId: String? = nil,
+        chapter: Int? = nil,
+        save: String? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.type = type
+        self.id = id
+        self.done = done
+        self.sequence = sequence
+        self.gen = gen
+        self.handle = handle
+        self.storyId = storyId
+        self.chapter = chapter
+        self.save = save
+    }
 }
+enum SleepMode: Int, Codable, Sendable, CaseIterable, Identifiable {
+    case auto = 0
+    case dashboard = 1
+    case reader = 2
+    case reminders = 3
+    case quote = 4
+    case minimal = 5
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Automatico"
+        case .dashboard: return "Lavagna Quotidiana"
+        case .reader: return "Compagno di Lettura"
+        case .reminders: return "Promemoria & Focus"
+        case .quote: return "Citazione & Mantra"
+        case .minimal: return "Minimalista Lume"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .auto: return "Adatta il poster al contesto (lettura, agenda o workout)"
+        case .dashboard: return "Quadro completo: data, telemetria, impegni e promemoria"
+        case .reader: return "Libro in corso, progresso %, pagine lette e citazione"
+        case .reminders: return "Checklist completa delle tue priorità da completare"
+        case .quote: return "Frase ispirazionale, mantra o nota con grande risalto"
+        case .minimal: return "Marchio geometrico Lume, data e telemetria essenziale"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .auto: return "sparkles"
+        case .dashboard: return "rectangle.3.group"
+        case .reader: return "book.closed"
+        case .reminders: return "checklist"
+        case .quote: return "quote.opening"
+        case .minimal: return "circle.hexagongrid"
+        }
+    }
+}
+
+struct SleepConfig: Codable, Sendable, Equatable {
+    var mode: SleepMode = .auto
+    var customTitle: String = ""
+    var customQuote: String = ""
+    var customAuthor: String = ""
+    var showBattery: Bool = true
+    var showTemperature: Bool = true
+    var showNextEvent: Bool = true
+    var showReadingStats: Bool = true
+    var showSleepTime: Bool = true
+}
+
 
 enum LumeProtocolError: LocalizedError, Equatable {
     case payloadLimitTooSmall(Int)
@@ -168,6 +251,55 @@ enum LumeProtocol {
 
         return payload
     }
+    static func makeSleepConfig(
+        config: SleepConfig,
+        maximumPayloadBytes: Int = maximumCardBytes
+    ) throws -> Data {
+        let byteLimit = min(maximumCardBytes, maximumPayloadBytes)
+        guard byteLimit >= 96 else { throw LumeProtocolError.payloadLimitTooSmall(byteLimit) }
+
+        let payload = SleepConfigPayload(
+            face: config.mode.rawValue,
+            title: config.customTitle.prefixUTF8(maxBytes: 48),
+            quote: config.customQuote.prefixUTF8(maxBytes: 160),
+            author: config.customAuthor.prefixUTF8(maxBytes: 48),
+            battery: config.showBattery,
+            temp: config.showTemperature,
+            event: config.showNextEvent,
+            stats: config.showReadingStats,
+            stamp: config.showSleepTime
+        )
+        let data = try encode(payload)
+        guard data.count <= byteLimit else {
+            throw LumeProtocolError.itemTooLarge(config.customQuote)
+        }
+        return data
+    }
+
+    static func makeTrailCatalog(stories: [TrailStoryInfo]) throws -> Data {
+        let payload = TrailCatalogPayload(
+            stories: stories.map {
+                TrailStoryEntry(
+                    id: $0.id,
+                    title: $0.title,
+                    chapters: $0.chapterCount,
+                    size: $0.fileSize,
+                    locale: $0.locale,
+                    installed: $0.isInstalled
+                )
+            }
+        )
+        return try encode(payload)
+    }
+
+    static func makeTrailSaveRestore(storyId: String, saveBase64: String) throws -> Data {
+        let payload = TrailSaveRestorePayload(
+            storyId: storyId,
+            save: saveBase64
+        )
+        return try encode(payload)
+    }
+
 
     static func decodeAction(_ data: Data) throws -> LumeDeviceAction {
         try JSONDecoder().decode(LumeDeviceAction.self, from: data)
@@ -204,6 +336,42 @@ private struct TimeSyncPayload: Encodable {
     let day: Int
     let minutesIntoDay: Int
 }
+private struct SleepConfigPayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "sleep.config"
+    let face: Int
+    let title: String
+    let quote: String
+    let author: String
+    let battery: Bool
+    let temp: Bool
+    let event: Bool
+    let stats: Bool
+    let stamp: Bool
+}
+
+private struct TrailStoryEntry: Encodable {
+    let id: String
+    let title: String
+    let chapters: Int
+    let size: Int
+    let locale: String
+    let installed: Bool
+}
+
+private struct TrailCatalogPayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "trail.catalog"
+    let stories: [TrailStoryEntry]
+}
+
+private struct TrailSaveRestorePayload: Encodable {
+    let schemaVersion = LumeProtocol.schemaVersion
+    let type = "trail.save.restore"
+    let storyId: String
+    let save: String
+}
+
 
 private struct ReminderSnapshotPayload: Encodable {
     let schemaVersion = LumeProtocol.schemaVersion

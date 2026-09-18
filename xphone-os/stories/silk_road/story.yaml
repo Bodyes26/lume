@@ -1,0 +1,679 @@
+story:
+  id: "silk_road"
+  title: "La Via della Seta"
+  locale: "it"
+  description: "Dalle lagune di Venezia fino alla corte del Gran Khan a Pechino, anno 1271."
+  author: "Lume"
+
+  resources:
+    - id: "supplies"
+      name: "Provviste"
+      icon: "bar"
+      max: 100
+      start: 85
+      critical: 15
+    - id: "health"
+      name: "Salute"
+      icon: "bar"
+      max: 100
+      start: 100
+      critical: 20
+    - id: "money"
+      name: "Fiorini"
+      icon: "number"
+      max: 5000
+      start: 350
+      critical: 50
+    - id: "silk"
+      name: "Seta"
+      icon: "number"
+      max: 50
+      start: 5
+    - id: "spices"
+      name: "Spezie"
+      icon: "number"
+      max: 50
+      start: 2
+    - id: "morale"
+      name: "Morale"
+      icon: "bar"
+      max: 100
+      start: 80
+      critical: 20
+
+  companions:
+    - id: "marco"
+      name: "Marco"
+      trait: "Esploratore"
+    - id: "fatima"
+      name: "Fatima"
+      trait: "Mercante"
+    - id: "chen"
+      name: "Chen"
+      trait: "Guardia"
+    - id: "yusuf"
+      name: "Yusuf"
+      trait: "Medico"
+
+chapter_1:
+  title: "Venezia"
+  nodes:
+    - id: "start"
+      title: "Il Molo di San Marco"
+      text: >
+        L'alba tinge di rosa le acque della laguna. La galea mercantile e carica.
+        Marco Polo controlla le carte nautiche, mentre Fatima verifica i barili
+        di provviste e le balle di panno fiammingo. Il viaggio verso levante comincia.
+      choices:
+        - label: "Salpare senza indugio"
+          effects:
+            - { resource: "supplies", delta: -5 }
+            - { resource: "morale", delta: 5 }
+            - { flag: 0, value: 1 } # Flag 0 = partenza rapida
+          next: "adriatico"
+        - label: "Acquistare scorte extra (-50 fiorini)"
+          condition: { resource: "money", min: 50 }
+          effects:
+            - { resource: "money", delta: -50 }
+            - { resource: "supplies", delta: 20 }
+          next: "adriatico"
+        - label: "Consultare l'astrologo del porto"
+          effects:
+            - { resource: "money", delta: -10 }
+            - { flag: 1, value: 1 } # Flag 1 = benedizione astrologica
+          next: "astrologo"
+
+    - id: "astrologo"
+      title: "La Torre dell'Orologio"
+      text: >
+        Il vecchio astrologo traccia cerchi sulla pergamena. 'Le stelle promettono
+        grandi ricchezze oltre le montagne, ma guardatevi dalle acque scure del mar Nero.'
+        Vi consegna un piccolo amuleto di rame.
+      choices:
+        - label: "Ringraziare e salpare"
+          effects:
+            - { resource: "morale", delta: 10 }
+          next: "adriatico"
+
+    - id: "adriatico"
+      title: "Il Mare Adriatico"
+      text: >
+        Venti favorevoli spingono la nave lungo la costa dalmata.
+        Dopo sei giorni di navigazione tranquilla, avvistate le mura imponenti
+        di Ragusa. Alcuni marinai chiedono una sosta per rifornirsi d'acqua dolce.
+      choices:
+        - label: "Fermarsi a Ragusa"
+          effects:
+            - { resource: "supplies", delta: -5 }
+            - { resource: "money", delta: -20 }
+            - { resource: "health", delta: 10 }
+          next: "verso_bisanzio"
+        - label: "Proseguire dritti a vele spiegate"
+          effects:
+            - { resource: "supplies", delta: -10 }
+            - { resource: "morale", delta: -5 }
+          next: "verso_bisanzio"
+
+    - id: "verso_bisanzio"
+      title: "Verso il Bosforo"
+      text: >
+        Le isole greche sfilano all'orizzonte. Il mare si fa piu agitato
+        all'imbocco dell'Ellesponto. Fatima osserva i gabbiani: 'Costantinopoli
+        e vicina. Prepariamo le merci per la dogana imperiale.'
+      choices:
+        - label: "Entrare nel Corno d'Oro"
+          next: "end_ch1"
+
+    - id: "end_ch1"
+      type: "chapter_end"
+      title: "Costantinopoli Raggiunta"
+      text: >
+        La galea scivola nelle acque dorate del Corno d'Oro.
+        Le cupole di Santa Sofia brillano nel tramonto. Il primo tratto
+        marittimo e compiuto: da qui la carovana proseguira via terra.
+
+chapter_2:
+  title: "Costantinopoli"
+  nodes:
+    - id: "start"
+      title: "Il Mercato di Pera"
+      text: >
+        Il quartiere veneziano di Pera brulica di mercanti levantini, greci e persiani.
+        Per attraversare l'Anatolia servono cavalli robusti, guide fidate e merci
+        da scambiare. Fatima suggerisce di vendere parte del panno per comprare seta grezza.
+      choices:
+        - label: "Negoziare con il mercante greco"
+          minigame: "contrattazione"
+          next: "dopo_mercato"
+        - label: "Arruolare Chen come capo scorta (-80 fiorini)"
+          condition: { resource: "money", min: 80 }
+          effects:
+            - { resource: "money", delta: -80 }
+            - { companion: "chen", join: true }
+            - { resource: "morale", delta: 10 }
+          next: "dopo_mercato"
+        - label: "Risparmiare denaro e partire subito"
+          effects:
+            - { resource: "supplies", delta: -10 }
+          next: "dopo_mercato"
+
+    - id: "dopo_mercato"
+      title: "La Porta di San Romano"
+      text: >
+        La carovana lascia le mura teodosiane alle spalle.
+        Sei cavalli da soma, tre carretti leggeri e le guide locali
+        aprono la pista verso gli altopiani anatolici.
+      choices:
+        - label: "Prendere la strada costiera del Mar Nero"
+          effects:
+            - { resource: "supplies", delta: -15 }
+            - { flag: 2, value: 1 } # Flag 2 = via costiera
+          next: "costa_pontica"
+        - label: "Tagliare per l'altopiano centrale"
+          effects:
+            - { resource: "supplies", delta: -20 }
+            - { resource: "health", delta: -10 }
+          next: "altopiano"
+
+    - id: "costa_pontica"
+      title: "La Costa Pontica"
+      text: >
+        Scogliere boscose e villaggi di pescatori. Il clima e umido e temperato.
+        A Sinope un pescatore offre pesce salato e informazioni sui passi montani.
+      choices:
+        - label: "Acquistare provviste (-30 fiorini)"
+          condition: { resource: "money", min: 30 }
+          effects:
+            - { resource: "money", delta: -30 }
+            - { resource: "supplies", delta: 25 }
+          next: "end_ch2"
+        - label: "Proseguire verso Trebisonda"
+          next: "end_ch2"
+
+    - id: "altopiano"
+      title: "L'Altopiano Roccioso"
+      text: >
+        Vento gelido e steppe aride. La carovana avanza a rilento.
+        Chen avvista briganti a cavallo in lontananza, ma la scorta li scoraggia.
+      choices:
+        - label: "Raggiungere Trebisonda"
+          effects:
+            - { resource: "morale", delta: 5 }
+          next: "end_ch2"
+
+    - id: "end_ch2"
+      type: "chapter_end"
+      title: "L'Impero di Trebisonda"
+      text: >
+        Le mura bianche di Trebisonda segnano l'ultimo avamposto bizantino.
+        Oltre queste montagne si stende la Persia degli Ilkhan mongoli.
+
+  minigames:
+    contrattazione:
+      title: "Bazar di Pera"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "◆", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Offerta accettata!"
+        - "Il mercante rifiuta."
+        - "Trattativa conclusa"
+      # VM bytecode: simple price negotiation minigame
+      setup: |
+        GINIT 6 4
+        PUSH 100
+        STORE 0
+        PUSH 0
+        STORE 1
+        TITLE 2
+        HALT
+      on_confirm: |
+        LOAD 0
+        PUSH 50
+        GE
+        JZ @win
+        PUSH 10
+        LOAD 0
+        SUB
+        STORE 0
+        INC 1
+        LOAD 1
+        PUSH 3
+        GE
+        JZ @cont
+        @win:
+        LOAD 0
+        WIN
+        @cont:
+        TEXT 0
+        HALT
+      on_back: |
+        LOSE
+
+chapter_3:
+  title: "Trebisonda e Anatolia"
+  nodes:
+    - id: "start"
+      title: "La Locanda del Caravanserraglio"
+      text: >
+        A Trebisonda incontrate Yusuf, un medico arabo che conosce le lingue
+        orientali e le erbe curative del Caucaso. Chiede di unirsi alla carovana
+        in cambio dei suoi servigi medici.
+      choices:
+        - label: "Accogliere Yusuf nel gruppo"
+          effects:
+            - { companion: "yusuf", join: true }
+            - { resource: "health", delta: 15 }
+            - { flag: 3, value: 1 } # Yusuf nel gruppo
+          next: "passo_zigana"
+        - label: "Rifiutare e proseguire da soli"
+          next: "passo_zigana"
+
+    - id: "passo_zigana"
+      title: "Il Passo di Zigana"
+      text: >
+        La salita verso il passo montano a 2000 metri e impervia.
+        Neve precoce copre i sentieri. Un mulo scivola su una lastra di ghiaccio.
+      choices:
+        - label: "Fermarsi per mettere in sicurezza il carico"
+          effects:
+            - { resource: "supplies", delta: -10 }
+          next: "tabriz_approccio"
+        - label: "Forzare la marcia prima della bufera"
+          effects:
+            - { resource: "health", delta: -15 }
+            - { resource: "supplies", delta: -5 }
+          next: "tabriz_approccio"
+
+    - id: "tabriz_approccio"
+      title: "Verso la Persia"
+      text: >
+        Scendendo dalle montagne armene, la terra si apre in grandi pianure.
+        In lontananza brillano le cupole turchesi e i minareti di Tabriz,
+        capitale dell'Ilkhanato mongolo.
+      choices:
+        - label: "Entrare a Tabriz"
+          next: "end_ch3"
+
+    - id: "end_ch3"
+      type: "chapter_end"
+      title: "Arrivo a Tabriz"
+      text: >
+        Tabriz e un crocevia colossale di mercanzie da ogni angolo del mondo noto.
+        Qui si incontrano le carovane dell'India, della Cina e del Mediterraneo.
+
+chapter_4:
+  title: "Il Bazar di Tabriz"
+  nodes:
+    - id: "start"
+      title: "Il Mercato Coperto"
+      text: >
+        Il labirinto del bazar coperto di Tabriz e lungo chilometri.
+        I banchi sono colmi di tappeti preziosi, lapislazzuli, spezie indiane e sete cinesi.
+        Fatima e nel suo elemento: 'Qui possiamo raddoppiare il valore del nostro carico.'
+      choices:
+        - label: "Vendere il panno e comprare spezie e seta"
+          effects:
+            - { resource: "money", delta: 150 }
+            - { resource: "silk", delta: 10 }
+            - { resource: "spices", delta: 8 }
+          next: "preparazione_deserto"
+        - label: "Comprare cammelli battriani per il deserto (-120 fiorini)"
+          condition: { resource: "money", min: 120 }
+          effects:
+            - { resource: "money", delta: -120 }
+            - { flag: 4, value: 1 } # Flag 4 = cammelli battriani
+          next: "preparazione_deserto"
+
+    - id: "preparazione_deserto"
+      title: "Le Porte di Tabriz"
+      text: >
+        La prossima tappa e il deserto del Dasht-e Kavir: trecento chilometri
+        di sabbia, sale e oasi remote. L'acqua e la vita.
+      choices:
+        - label: "Riempire tutti gli otri e partire"
+          effects:
+            - { resource: "supplies", delta: -15 }
+          next: "end_ch4"
+
+    - id: "end_ch4"
+      type: "chapter_end"
+      title: "Verso il Deserto"
+      text: >
+        La carovana si allinea verso oriente. Il sole dell'altopiano iranico
+        scalda la sabbia. Comincia la traversata del Kavir.
+
+chapter_5:
+  title: "Il Deserto del Kavir"
+  nodes:
+    - id: "start"
+      title: "Le Dune di Sale"
+      text: >
+        Il caldo e opprimente di giorno, il gelo punge di notte.
+        All'orizzonte si alza un muro scuro di polvere: il simun,
+        la tempesta di sabbia del deserto, sta arrivando.
+      choices:
+        - label: "Affrontare la tempesta e trovare rifugio"
+          minigame: "tempesta"
+          next: "dopo_tempesta"
+        - label: "Accamparsi dietro i cammelli e attendere"
+          effects:
+            - { resource: "supplies", delta: -20 }
+            - { resource: "health", delta: -10 }
+            - { resource: "morale", delta: -10 }
+          next: "dopo_tempesta"
+
+    - id: "dopo_tempesta"
+      title: "L'Oasi di Tabas"
+      text: >
+        I palmizi dell'oasi di Tabas appaiono come un miraggio benedetto.
+        Acqua fresca sgorga dai qanat sotterranei. I cammelli si abbeverano
+        e gli uomini riposano all'ombra delle palme.
+      choices:
+        - label: "Riposare due giorni all'oasi"
+          effects:
+            - { resource: "health", delta: 25 }
+            - { resource: "morale", delta: 15 }
+            - { resource: "supplies", delta: -10 }
+          next: "verso_samarcanda"
+
+    - id: "verso_samarcanda"
+      title: "L'Amu Darya"
+      text: >
+        Attraversato il deserto, il grande fiume Oxus (Amu Darya) segna l'ingresso
+        nella Transoxiana. Campi di cotone e frutteti irrigati annunciano
+        la vicinanza di Samarcanda.
+      choices:
+        - label: "Raggiungere le mura di Samarcanda"
+          next: "end_ch5"
+
+    - id: "end_ch5"
+      type: "chapter_end"
+      title: "La Perla d'Oriente"
+      text: >
+        Samarcanda, crocevia tra India, Persia e Cina.
+        I mercanti di tutto il continente si scambiano storie e ricchezze.
+
+  minigames:
+    tempesta:
+      title: "Tempesta di Sabbia"
+      grid: { w: 8, h: 6 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "≈", style: "black" }
+        2: { char: "▲", style: "inverted" }
+      strings:
+        - "Rifugio raggiunto!"
+        - "Perso nella bufera..."
+        - "Guida la carovana"
+      setup: |
+        GINIT 8 6
+        PUSH 7
+        PUSH 5
+        PUSH 2
+        GSET
+        PUSH 15
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        PUSH 7
+        EQ
+        CURY
+        PUSH 5
+        EQ
+        AND
+        JZ @step
+        TEXT 0
+        PUSH 100
+        WIN
+        @step:
+        DEC 0
+        LOAD 0
+        PUSH 0
+        LE
+        JZ @cont
+        LOSE
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_6:
+  title: "Samarcanda"
+  nodes:
+    - id: "start"
+      title: "La Piazza del Registan"
+      text: >
+        Madrasse imponenti con mosaici azzurri dominano la piazza.
+        Fatima incontra mercanti sogdiani che arrivano dal bacino del Tarim.
+        'Le merci piu richieste a Pechino sono il vetro veneziano e le spezie persiane.'
+      choices:
+        - label: "Riorganizzare il carico sui cammelli"
+          minigame: "carico"
+          next: "partenza_pamir"
+        - label: "Vendere meta delle spezie (+200 fiorini)"
+          effects:
+            - { resource: "money", delta: 200 }
+            - { resource: "spices", delta: -4 }
+          next: "partenza_pamir"
+
+    - id: "partenza_pamir"
+      title: "I Piedi del Pamir"
+      text: >
+        I mercanti locali avvertono: 'Il Tetto del Mondo non perdona.
+        Il passo del Pamir supera i quattromila metri. Portate legna e lana cotta.'
+      choices:
+        - label: "Comprare indumenti pesanti (-60 fiorini)"
+          condition: { resource: "money", min: 60 }
+          effects:
+            - { resource: "money", delta: -60 }
+            - { flag: 5, value: 1 } # Flag 5 = lana pesante
+          next: "end_ch6"
+        - label: "Affidarsi alla resistenza degli uomini"
+          next: "end_ch6"
+
+    - id: "end_ch6"
+      type: "chapter_end"
+      title: "Verso il Tetto del Mondo"
+      text: >
+        La carovana imbocca la gola montuosa. Le vette innevate del Pamir
+        si ergono titaniche contro il cielo cobalto.
+
+  minigames:
+    carico:
+      title: "Carico Cammelli"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "█", style: "black" }
+        2: { char: "▓", style: "inverted" }
+      strings:
+        - "Carico ottimizzato!"
+        - "Troppo pesante"
+        - "Stiva del cammello"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        CURY
+        GGET
+        JZ @place
+        CURX
+        CURY
+        PUSH 0
+        GSET
+        DEC 0
+        HALT
+        @place:
+        CURX
+        CURY
+        PUSH 1
+        GSET
+        INC 0
+        LOAD 0
+        PUSH 8
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_7:
+  title: "Il Passo del Pamir"
+  nodes:
+    - id: "start"
+      title: "Il Tetto del Mondo"
+      text: >
+        A 4000 metri l'aria e rarefatta. Il respiro si fa corto e il fuoco
+        stenta ad accendersi. Marco osserva il comportamento delle pecore giganti
+        dalle corna ricurve (che piu tardi prenderanno il suo nome: Ovis Poli).
+      choices:
+        - label: "Mantenere la guardia notturna attiva"
+          minigame: "guardia"
+          next: "discesa_kashgar"
+        - label: "Avanzare a tappe forzate"
+          effects:
+            - { resource: "health", delta: -20 }
+            - { resource: "supplies", delta: -10 }
+          next: "discesa_kashgar"
+
+    - id: "discesa_kashgar"
+      title: "La Discesa a Kashgar"
+      text: >
+        Superato il passo, la discesa porta all'oasi di Kashgar, dove la Via della Seta
+        si divide tra il ramo nord e il ramo sud del micidiale deserto del Taklamakan.
+      choices:
+        - label: "Prendere la via settentrionale per Dunhuang"
+          effects:
+            - { resource: "supplies", delta: -15 }
+          next: "grotte_dunhuang"
+
+    - id: "grotte_dunhuang"
+      title: "Le Grotte di Mogao"
+      text: >
+        A Dunhuang, centinaia di templi scavati nella roccia custodiscono
+        migliaia di statue buddhiste e manoscritti in decine di lingue.
+        I monaci offrono te e preghiere di protezione per l'ultimo tratto.
+      choices:
+        - label: "Entrare nella Cina degli Yuan"
+          effects:
+            - { resource: "morale", delta: 20 }
+          next: "end_ch7"
+
+    - id: "end_ch7"
+      type: "chapter_end"
+      title: "La Grande Muraglia"
+      text: >
+        I primi bastioni della Grande Muraglia si profilano all'orizzonte.
+        Il Gran Canale e la pianura di Pechino sono a pochi giorni di cammino.
+
+  minigames:
+    guardia:
+      title: "Guardia Notturna"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "◎", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Notte tranquilla"
+        - "Allarme!"
+        - "Sorveglianza campo"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        INC 0
+        LOAD 0
+        PUSH 4
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_8:
+  title: "Pechino — Alla Corte del Gran Khan"
+  nodes:
+    - id: "start"
+      title: "Le Porte di Khanbaliq"
+      text: >
+        Le mura gigantesche di Khanbaliq (Pechino) si innalzano sopra la pianura.
+        Ufficiali mongoli con armature scintillanti e vesti di seta controllano i passaporti
+        d'oro (Paiza) e scortano la carovana attraverso le vie perfettamente geometriche.
+      choices:
+        - label: "Presentarsi al Palazzo d'Inverno di Kublai Khan"
+          next: "sala_trono"
+
+    - id: "sala_trono"
+      title: "Il Palazzo di Giada"
+      text: >
+        La sala del trono e sterminata: colonne dorate intagliate con draghi,
+        mille dignitari vestiti di broccato e il Gran Khan Kublai assiso sul trono di giada.
+        Marco Polo presenta le lettere papali e i doni veneziani.
+      choices:
+        - label: "Offrire la seta, le spezie e i panni veneziani"
+          effects:
+            - { resource: "money", delta: 1000 }
+            - { resource: "morale", delta: 30 }
+          next: "vittoria_finale"
+
+    - id: "vittoria_finale"
+      title: "Onori Imperiali"
+      text: >
+        Kublai Khan sorride con benevolenza. 'Uomini coraggiosi dall'estremo ponente!
+        La vostra carovana ha attraversato deserti e montagne senza mai piegarsi.
+        Sarete accolti come consiglieri imperiali.'
+      choices:
+        - label: "Accettare l'incarico del Gran Khan"
+          next: "end_ch8"
+
+    - id: "end_ch8"
+      type: "chapter_end"
+      title: "Viaggio Trionfale"
+      text: >
+        La Via della Seta e stata conquistata. Dalle lagune di Venezia fino
+        al cuore della Cina imperiale, la tua carovana entra nella leggenda.

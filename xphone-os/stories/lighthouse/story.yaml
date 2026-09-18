@@ -1,0 +1,555 @@
+story:
+  id: "lighthouse"
+  title: "L'Ultimo Faro"
+  locale: "it"
+  description: "Il guardiano dell'ultimo faro costiero in un mondo dopo il crollo."
+  author: "Lume"
+
+  resources:
+    - id: "food"
+      name: "Cibo"
+      icon: "bar"
+      max: 100
+      start: 75
+      critical: 15
+    - id: "health"
+      name: "Salute"
+      icon: "bar"
+      max: 100
+      start: 90
+      critical: 20
+    - id: "materials"
+      name: "Materiali"
+      icon: "number"
+      max: 500
+      start: 120
+    - id: "fuel"
+      name: "Carburante"
+      icon: "bar"
+      max: 100
+      start: 80
+      critical: 15
+    - id: "reputation"
+      name: "Fiducia"
+      icon: "bar"
+      max: 100
+      start: 60
+      critical: 15
+    - id: "refugees"
+      name: "Rifugiati"
+      icon: "number"
+      max: 50
+      start: 4
+      critical: 0
+
+  companions:
+    - id: "elena"
+      name: "Elena"
+      trait: "Pescatrice"
+    - id: "aldo"
+      name: "Aldo"
+      trait: "Marinaio"
+    - id: "jun"
+      name: "Jun"
+      trait: "Ingegnere"
+    - id: "marta"
+      name: "Marta"
+      trait: "Dottoressa"
+
+chapter_1:
+  title: "Settimana 1: La Torre di Pietra"
+  nodes:
+    - id: "start"
+      title: "La Lanterna"
+      text: >
+        Il vento soffia da nord-ovest, portando l'odore acre del sale e delle alghe.
+        Dalla balconata del faro si vede solo l'infinita distesa grigia dell'oceano.
+        Elena, la pescatrice che vive nella cala sottostante, sale le scale a chiocciola:
+        'Le reti sono quasi vuote oggi. Se non peschiamo nella secca, il cibo scarseggera.'
+      choices:
+        - label: "Uscire in barca per pescare nella secca"
+          minigame: "pesca"
+          next: "dopo_pesca"
+        - label: "Restare alla torre per pulire le lenti di Fresnel"
+          effects:
+            - { resource: "fuel", delta: -5 }
+            - { resource: "materials", delta: 15 }
+            - { flag: 0, value: 1 } # Flag 0 = lenti pulite
+          next: "dopo_pesca"
+
+    - id: "dopo_pesca"
+      title: "Il Tramonto sulla Scogliera"
+      text: >
+        Il faro si accende con un ronzio sommesso. Il fascio di luce bianca
+        taglia il crepuscolo, ruotando ogni dodici secondi.
+        Finche la lampada brilla, chi e in mare sa che la costa non e abbandonata.
+      choices:
+        - label: "Concludere il turno di guardia"
+          next: "end_ch1"
+
+    - id: "end_ch1"
+      type: "chapter_end"
+      title: "La Prima Settimana"
+      text: >
+        La prima settimana al faro e trascorsa tranquilla.
+        Ma all'alba dell'ottavo giorno, una sagoma scura emerge dai flutti.
+
+  minigames:
+    pesca:
+      title: "Pesca alla Secca"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "≈", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Pesce Pescato!"
+        - "Lenza vuota"
+        - "Lancia la rete"
+      setup: |
+        GINIT 6 4
+        PUSH 2
+        PUSH 1
+        PUSH 2
+        GSET
+        PUSH 5
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        CURY
+        GGET
+        PUSH 2
+        EQ
+        JZ @miss
+        TEXT 0
+        PUSH 100
+        WIN
+        @miss:
+        CURX
+        CURY
+        PUSH 1
+        GSET
+        DEC 0
+        LOAD 0
+        PUSH 0
+        LE
+        JZ @cont
+        LOSE
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_2:
+  title: "Settimana 2: Il Primo Naufrago"
+  nodes:
+    - id: "start"
+      title: "La Spiaggia dei Relitti"
+      text: >
+        Un uomo anziano, aggrappato a un asse di legno fradicio, e svenuto sulla ghiaia.
+        Porta i tatuaggi tipici dei marinai delle isole meridionali.
+        Elena lo soccorre: 'Respira ancora, ma ha la febbre alta.'
+      choices:
+        - label: "Accoglierlo al faro e curarlo con le scorte (-10 cibo, -10 salute)"
+          effects:
+            - { resource: "food", delta: -10 }
+            - { companion: "aldo", join: true }
+            - { resource: "reputation", delta: 15 }
+            - { flag: 1, value: 1 } # Flag 1 = Aldo accolto
+          next: "risveglio_aldo"
+        - label: "Lasciargli una coperta e provviste sulla spiaggia"
+          effects:
+            - { resource: "food", delta: -5 }
+            - { resource: "reputation", delta: -10 }
+          next: "end_ch2"
+
+    - id: "risveglio_aldo"
+      title: "Il Racconto di Aldo"
+      text: >
+        Il marinaio si riprende dopo due giorni: 'Mi chiamo Aldo.
+        La mia goletta e affondata nella burrasca di Capo Nero.
+        Sulle scogliere piu a sud ci sono relitti carichi di legname e metallo.'
+      choices:
+        - label: "Organizzare una spedizione di recupero con Aldo"
+          effects:
+            - { resource: "materials", delta: 40 }
+            - { resource: "fuel", delta: 10 }
+          next: "end_ch2"
+
+    - id: "end_ch2"
+      type: "chapter_end"
+      title: "La Comunita Cresce"
+      text: >
+        Aldo e ora parte del faro. Le sue mani esperte riparano
+        gli argani della rimessa e rinforzano le finestre della torre.
+
+chapter_3:
+  title: "Settimana 3: La Grande Tempesta"
+  nodes:
+    - id: "start"
+      title: "La Notte delle Onde Giganti"
+      text: >
+        Il barometro crolla a picco. Onde alte dieci metri si infrangono
+        sul basamento di granito del faro. Una raffica violenta incrina
+        uno dei vetri della lanterna: il bruciatore a petrolio rischia di spegnersi.
+      choices:
+        - label: "Salire sulla lanterna e riparare il meccanismo"
+          minigame: "riparazione"
+          next: "tempesta_passata"
+        - label: "Spegnere il faro per proteggere il combustibile"
+          effects:
+            - { resource: "reputation", delta: -25 }
+            - { resource: "fuel", delta: 15 }
+          next: "tempesta_passata"
+
+    - id: "tempesta_passata"
+      title: "L'Alba Dopo la Bufera"
+      text: >
+        Il mare si calma lentamente. Sotto la scogliera, la luce del faro
+        ha salvato un peschereccio alla deriva con tre rifugiati a bordo.
+      choices:
+        - label: "Accogliere i rifugiati alla stazione (+3 rifugiati, -15 cibo)"
+          effects:
+            - { resource: "refugees", delta: 3 }
+            - { resource: "food", delta: -15 }
+            - { resource: "reputation", delta: 20 }
+          next: "end_ch3"
+
+    - id: "end_ch3"
+      type: "chapter_end"
+      title: "Il Faro Resiste"
+      text: >
+        La torre ha retto alla furia degli elementi.
+        La reputazione del faro come porto sicuro si diffonde lungo la costa.
+
+  minigames:
+    riparazione:
+      title: "Riparazione Lanterna"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "■", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Meccanismo Riparato!"
+        - "Guasto al bruciatore"
+        - "Stringi i bulloni"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        INC 0
+        LOAD 0
+        PUSH 4
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_4:
+  title: "Settimana 4: La Nave Straniera"
+  nodes:
+    - id: "start"
+      title: "L'Ancoraggio nella Baia"
+      text: >
+        Un battello a vapore arrugginito entra nella rada battendo bandiera neutrale.
+        Jun, una giovane ingegnera che guida la nave, scende a terra:
+        'Cerchiamo combustibile raffinato. Possiamo barattare cibo in scatola e medicinali.'
+      choices:
+        - label: "Barattare carburante per cibo e cure"
+          effects:
+            - { resource: "fuel", delta: -20 }
+            - { resource: "food", delta: 30 }
+            - { resource: "health", delta: 20 }
+            - { companion: "jun", join: true }
+          next: "partenza_nave"
+        - label: "Rifiutare lo scambio per conservare il carburante"
+          next: "partenza_nave"
+
+    - id: "partenza_nave"
+      title: "Intese Commerciali"
+      text: >
+        Jun decide di stabilirsi al faro per convertire il generatore a olio di pesce.
+        La sua competenza tecnica raddoppia l'efficienza energetica della stazione.
+      choices:
+        - label: "Costruire il nuovo generatore (-30 materiali)"
+          condition: { resource: "materials", min: 30 }
+          effects:
+            - { resource: "materials", delta: -30 }
+            - { resource: "fuel", delta: 35 }
+          next: "end_ch4"
+        - label: "Rimandare i lavori"
+          next: "end_ch4"
+
+    - id: "end_ch4"
+      type: "chapter_end"
+      title: "Nuove Risorse"
+      text: >
+        Il faro produce ora la propria energia. La comunita conta otto persone.
+
+chapter_5:
+  title: "Settimana 5: L'Epidemia"
+  nodes:
+    - id: "start"
+      title: "Febbre nelle Camerate"
+      text: >
+        Una forma grave di polmonite colpisce quattro rifugiati ed Elena.
+        La dottoressa Marta, arrivata da un villaggio abbandonato, offre aiuto:
+        'Servono erbe medicinali che crescono solo tra le rovine della vecchia colonia penale.'
+      choices:
+        - label: "Inviare una squadra nelle rovine per le medicine"
+          minigame: "rovine"
+          next: "cura_malati"
+        - label: "Usare le poche scorte alcoliche come disinfettante"
+          effects:
+            - { resource: "health", delta: -15 }
+            - { resource: "food", delta: -10 }
+          next: "cura_malati"
+
+    - id: "cura_malati"
+      title: "La Baia Medica"
+      text: >
+        Marta prepara gli infusi curativi. Dopo giorni di veglia febbrile,
+        il respiro di Elena torna regolare. Marta accetta di rimanere come medico stabile.
+      choices:
+        - label: "Accogliere Marta come medico ufficiale"
+          effects:
+            - { companion: "marta", join: true }
+            - { resource: "health", delta: 25 }
+            - { resource: "morale", delta: 15 }
+          next: "end_ch5"
+
+    - id: "end_ch5"
+      type: "chapter_end"
+      title: "Pericolo Scampato"
+      text: >
+        Tutti i malati sono guariti. Il faro e ora dotato di una vera infermeria.
+
+  minigames:
+    rovine:
+      title: "Esplora Rovine"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "▓", style: "black" }
+        2: { char: "★", style: "inverted" }
+      strings:
+        - "Erbe Trovate!"
+        - "Macerie pericolose"
+        - "Cerca tra i ruderi"
+      setup: |
+        GINIT 6 4
+        PUSH 4
+        PUSH 2
+        PUSH 2
+        GSET
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        CURY
+        GGET
+        PUSH 2
+        EQ
+        JZ @miss
+        TEXT 0
+        PUSH 100
+        WIN
+        @miss:
+        CURX
+        CURY
+        PUSH 1
+        GSET
+        INC 0
+        LOAD 0
+        PUSH 5
+        GE
+        JZ @cont
+        LOSE
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_6:
+  title: "Settimana 6: I Predatori del Mare"
+  nodes:
+    - id: "start"
+      title: "Vele Nere all'Orizzonte"
+      text: >
+        Tre scafi veloci di predoni costieri si avvicinano alla baia.
+        Vogliono saccheggiare le scorte di cibo e carburante della stazione.
+        Tomas e Jun preparano i fari ausiliari per accecare i timonieri.
+      choices:
+        - label: "Usare i proiettori per guidare la difesa"
+          minigame: "difesa"
+          next: "respinta_pirati"
+        - label: "Offrire un tributo di carburante per evitare lo scontro"
+          effects:
+            - { resource: "fuel", delta: -35 }
+            - { resource: "reputation", delta: -20 }
+          next: "respinta_pirati"
+
+    - id: "respinta_pirati"
+      title: "La Baia Sicura"
+      text: >
+        I proiettori abbaglianti e i colpi di fucile sparati dalla galleria del faro
+        mettono in fuga i predoni. Uno dei loro barchini si incaglia:
+        a bordo troviamo scorte di munizioni e viveri abbandonati.
+      choices:
+        - label: "Recuperare il carico del barchino"
+          effects:
+            - { resource: "materials", delta: 30 }
+            - { resource: "food", delta: 20 }
+            - { resource: "reputation", delta: 15 }
+          next: "end_ch6"
+
+    - id: "end_ch6"
+      type: "chapter_end"
+      title: "Vittoria Difensiva"
+      text: >
+        Il faro ha dimostrato di potersi difendere.
+        La gente della costa comincia a vedere la torre come un rifugio inespugnabile.
+
+  minigames:
+    difesa:
+      title: "Difesa Proiettori"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "▲", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Predoni in Fuga!"
+        - "Bersaglio mancato"
+        - "Punta i fari"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        INC 0
+        LOAD 0
+        PUSH 4
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_7:
+  title: "Settimana 7: Il Segnale Oltre la Nebbia"
+  nodes:
+    - id: "start"
+      title: "La Radio di Jun"
+      text: >
+        Jun ripara il vecchio ricevitore a onde corte della sala radio.
+        Attraverso le scariche statiche, una voce chiara ripete:
+        'Qui Sanctuarium della Baia Nord. Abbiamo una centrale idroelettrica
+        e colture protette. Accogliamo rifugiati guidati dalla luce del Faro Tre.'
+      choices:
+        - label: "Rispondere al segnale e confermare la rotta per i superstiti"
+          effects:
+            - { resource: "reputation", delta: 30 }
+            - { flag: 4, value: 1 } # Flag 4 = alleanza con Sanctuarium
+          next: "preparazione_futuro"
+        - label: "Mantenere il silenzio radio per prudenza"
+          next: "preparazione_futuro"
+
+    - id: "preparazione_futuro"
+      title: "La Decisione della Comunita"
+      text: >
+        La comunita del faro conta ormai venti persone.
+        Le serre producono verdura fresca, le barche pescano regolarmente,
+        e la luce del faro guida le imbarcazioni di superstiti verso la speranza.
+      choices:
+        - label: "Preparare la celebrazione del primo anno di guardia"
+          next: "end_ch7"
+
+    - id: "end_ch7"
+      type: "chapter_end"
+      title: "Un Anno di Luce"
+      text: >
+        Trecentosessantacinque notti di luce ininterrotta.
+        Il faro non e piu solo una torre di pietra: e il cuore di una nuova societa.
+
+chapter_8:
+  title: "Settimana 8: L'Eredita del Faro"
+  nodes:
+    - id: "start"
+      title: "L'Alba di un Nuovo Giorno"
+      text: >
+        Un convoglio di dieci imbarcazioni da Sanctuarium entra nella rada.
+        Portano pannelli solari, sementi e materiali da costruzione.
+        Il faro viene eletto a porto franco della confederazione costiera.
+      choices:
+        - label: "Inaugurare il porto franco del faro"
+          next: "vittoria_faro"
+
+    - id: "vittoria_faro"
+      title: "La Luce Non Si Spegne"
+      text: >
+        Dalla balconata piu alta, guardi la baia brulicante di vita.
+        Elena ripara le reti con i giovani apprendisti, Jun collauda i nuovi accumulatori,
+        Marta cura i nuovi arrivati, e Aldo insegna l'arte della navigazione.
+        La lanterna gira instancabile. La notte del mondo ha trovato la sua stella.
+      choices:
+        - label: "Proseguire la guardia per sempre"
+          next: "end_ch8"
+
+    - id: "end_ch8"
+      type: "chapter_end"
+      title: "Guardiano Eterno"
+      text: >
+        La storia dell'Ultimo Faro si conclude qui.
+        Ma la sua luce risplendera per generazioni.

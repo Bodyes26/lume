@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+#include "../games/GameTypes.h"
+
 // Firmware version shown in About (AboutScene.cpp:36), in the Settings header
 // and footer (SettingsScene.cpp:287,300) and served by GET /health and
 // GET /info (net/FileTransferServer.cpp:70,146,155). A macro, not a constant,
@@ -34,6 +36,15 @@ enum class SceneId : uint32_t {
   Reader = 7,
   Workout = 8,
   FileTransfer = 9,
+  // Games: the menu plus one id per pastime. Explicit values like every id
+  // above — this integer is what NVS hands back on wake, so renumbering it
+  // would restore a device into the wrong app after a firmware update.
+  Games = 10,
+  Sudoku = 11,
+  Nonogram = 12,
+  Mines = 13,
+  TrailList = 14,
+  TrailGame = 15,
 };
 
 // Single source of truth for "what scene is on glass" — set by every show*()
@@ -65,6 +76,20 @@ void showFileTransferAutoStart();  // R2: same, but bring Wi-Fi up immediately (
 // (restart is the clean Wi-Fi teardown); no-op on any other scene.
 void stopFileTransferIfActive();
 
+void showGames();       // Games: pick a pastime, then daily or a free-play level
+// The three pastimes. `daily` selects today's board (pack index/seed derived
+// from the day serial, tier forced to games::kDailyTier and `tier` ignored);
+// false is free play at `tier`.
+void showSudoku(games::Tier tier, bool daily);
+void showNonogram(games::Tier tier, bool daily);
+void showMines(games::Tier tier, bool daily);
+// Sleep hook: persist the active game's in-progress DAILY board before the loop
+// dies. No-op on every other scene.
+void gamesPersistDaily();
+
+void showTrailList();
+void showTrailStory(const uint8_t* storyData, uint32_t storySize);
+void trailPersistSave();
 // M2: main.cpp marshals BLE/ANCS events to redraws with these — a scene is
 // only marked dirty when it is the one on glass (e-ink discipline: a
 // notification burst never repaints the launcher, a connection change never

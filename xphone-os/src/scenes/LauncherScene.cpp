@@ -17,22 +17,16 @@
 
 namespace {
 
-// Six focus apps in a 3×2 grid, ordered by likelihood of use (Today first —
-// it is also the boot selection). Settings opens from BACK; About is in
-// Settings. Icon bitmaps come from IconStyle (Settings → Icon style packs);
-// the XPhoneIconPacks columns in LauncherIcons.h share this order.
+// Seven focus apps across two 2x3 pages:
+// Page 1 (0..5): Today, Notifications, Reminders, Block, Read, Workout
+// Page 2 (6):    Games
 constexpr const char* kApps[LauncherScene::APP_COUNT] = {
-    L10N("Today", "Oggi"), L10N("Notifications", "Notifiche"), L10N("Reminders", "Promemoria"), L10N("Block", "Focus"), L10N("Read", "Leggi"), L10N("Workout", "Allenamento"),
+    L10N("Today", "Oggi"),        L10N("Notifications", "Notifiche"),
+    L10N("Reminders", "Promemoria"), L10N("Block", "Focus"),
+    L10N("Read", "Leggi"),        L10N("Workout", "Allenamento"),
+    L10N("Games", "Giochi"),
 };
 
-// 1bpp blitter for the ported artwork (format per LauncherIcons.h header;
-// a cleared bit is ink, only ink pixels are drawn so paper stays white).
-//
-// Masters are always XPhoneLauncherIconSize wide. `size` is the on-screen
-// footprint — when it differs from the master we nearest-neighbor sample
-// (same math as Settings' icon-style preview). Using `size` as the row
-// stride was a bug: drawing at 88% of 104 made rowBytes 12 instead of 13
-// and scrambled the bitmap into TV-static.
 void drawIcon(Gfx& gfx, const uint8_t* bitmap, const int x, const int y, const int size) {
   const int srcSize = XPhoneLauncherIconSize;
   const int rowBytes = (srcSize + 7) / 8;
@@ -46,23 +40,16 @@ void drawIcon(Gfx& gfx, const uint8_t* bitmap, const int x, const int y, const i
   }
 }
 
-// Layout (both panels are native landscape; everything derives from gfx dims).
+// Layout constants (2x3 grid with comfortable margins)
 constexpr int kMargin = 16;       // outer margin
 constexpr int kStatusH = 40;      // status bar height incl. separator
 constexpr int kGap = 28;          // gap between cells (row + column)
 constexpr int kSelRadius = 12;    // tile rounded-corner radius
 constexpr int kSelThick = 3;      // selection border thickness
-constexpr int kBoxInset = 8;      // rounded box inset inside the cell (near-full tile)
+constexpr int kBoxInset = 8;      // rounded box inset inside the cell
 constexpr int kTilePad = 12;      // inner padding between the box edge and icon/label
-constexpr int kMaxTileSide = 186; // cap so 5 tiles don't fill the panel — smaller
-                                  // boxes with comfortable margins (approved size)
+constexpr int kMaxTileSide = 186; // approved card size for 2x3 grid
 
-int gridRows() { return (LauncherScene::APP_COUNT + LauncherScene::COLS - 1) / LauncherScene::COLS; }
-
-// Lazily constructed so BoardConfig::ACTIVE is definitely set (no static-init
-// order dependence). X3 reads the BQ27220 fuel gauge over I2C
-// (FREEINK_BATTERY_I2C_GAUGE, SDA20/SCL0 from BoardConfig); X4 falls through
-// to the ADC divider path in the same binary.
 BatteryMonitor& battery() {
   static BatteryMonitor mon;
   return mon;
@@ -72,40 +59,48 @@ BatteryMonitor& battery() {
 
 void LauncherScene::moveSelection(const int dCol, const int dRow) {
   int sel = _sel;
-  // Front Left/Right = linear PREV/NEXT with wrap (Workout↔Today).
-  // Up/Down move by row and still clamp (no wrap) so a short last row feels
-  // predictable.
+  const int prevPage = _sel / PAGE_SIZE;
+
+  // Front Left/Right = linear PREV/NEXT with wrap across all apps & pages
   if (dCol != 0) {
     sel = (sel + dCol) % APP_COUNT;
     if (sel < 0) sel += APP_COUNT;
   }
-  if (dRow < 0 && sel >= COLS) sel -= COLS;
+
+  // Side Up/Down = vertical navigation
+  if (dRow < 0) {
+    if (sel >= COLS) sel -= COLS;
+  }
   if (dRow > 0) {
     if (sel + COLS < APP_COUNT) {
       sel += COLS;
-    } else if (sel / COLS < (APP_COUNT - 1) / COLS) {
-      sel = APP_COUNT - 1;  // clamp into a short last row
+    } else if (sel < APP_COUNT - 1) {
+      sel = APP_COUNT - 1;
     }
   }
+
   if (sel != _sel) {
     const int prev = _sel;
     _sel = sel;
-    // M2.1a: a selection move repaints only the two affected cells (the
-    // launcher's soft-key labels never change, the status bar is untouched by
-    // selection). Before the first render the layout cache is empty and
-    // cellRect() returns an empty rect — markDirty(empty) falls back to
-    // full-panel, so this is safe in every state.
-    XpRect dirty = cellRect(prev);
-    dirty.unionWith(cellRect(_sel));
-    markDirty(dirty);
+    const int newPage = _sel / PAGE_SIZE;
+
+    if (newPage != prevPage) {
+      // Page flip: redraw the entire launcher
+      markDirty();
+    } else {
+      // Same page: differential refresh of the two affected tiles
+      XpRect dirty = cellRect(prev % PAGE_SIZE);
+      dirty.unionWith(cellRect(_sel % PAGE_SIZE));
+      markDirty(dirty);
+    }
   }
 }
 
-XpRect LauncherScene::cellRect(const int i) const {
-  if (_side <= 0) return XpRect{};  // no layout yet -> full-panel fallback
-  constexpr int16_t kSlop = 6;      // border rounding + label overhang past the tile edge
-  const int col = i % COLS;
-  const int row = i / COLS;
+XpRect LauncherScene::cellRect(const int pageIdx) const {
+  if (_side <= 0) return XpRect{};
+  constexpr int16_t kSlop = 6;
+  const int col = pageIdx % COLS;
+  const int row = pageIdx / COLS;
   const int x = _gridX + col * (_side + kGap);
   const int y = _gridY + row * (_cellH + kGap);
   return XpRect{static_cast<int16_t>(x - kSlop), static_cast<int16_t>(y - kSlop),
@@ -113,10 +108,6 @@ XpRect LauncherScene::cellRect(const int i) const {
 }
 
 void LauncherScene::handleInput(Input& in) {
-  // Quick action: long-press the top-RIGHT button (Btn::Down) to start a
-  // Deep Work block without opening the app. Checked before the tap handlers;
-  // the Input state machine suppresses the tap-on-release once a long-press
-  // fires, so Btn::Down won't also move the selection this press.
   if (in.wasLongPressed(Btn::Down)) {
     showBlockDeepWork();
     return;
@@ -139,17 +130,16 @@ void LauncherScene::handleInput(Input& in) {
       showReader();
     } else if (strcmp(app, L10N("Workout", "Allenamento")) == 0) {
       showWorkout();
+    } else if (strcmp(app, L10N("Games", "Giochi")) == 0) {
+      showGames();
     }
   }
-  // BACK soft-key (short tap) opens Settings. SceneManager intercepts the
-  // LONG-press BACK for the OS-wide go-home (a no-op on the launcher), so only
-  // a short tap reaches here.
   if (in.wasPressed(Btn::Back)) showSettings();
 }
 
 const char* const* LauncherScene::softKeys() const {
-  // Slot 0 (BACK button) opens Settings on the launcher; About lives inside it.
-  static constexpr const char* kKeys[4] = {L10N("SETTINGS", "IMPOSTA"), L10N("OPEN", "APRI"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
+  static constexpr const char* kKeys[4] = {
+      L10N("SETTINGS", "IMPOSTA"), L10N("OPEN", "APRI"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
   return kKeys;
 }
 
@@ -157,15 +147,11 @@ void LauncherScene::render(Gfx& gfx) {
   const int w = gfx.width();
   const int h = gfx.height();
 
-  // --- Status bar: Lume lockup left, battery icon + percent right ----------
+  // --- Status bar ---
   drawLumeMark(gfx, kMargin + 12, 3, 24);
   gfx.drawText(kFontBold, kMargin + 34, 4, "lume");
-  // CrossPoint-style indicator (StatusBar.h): 15x12 body + nub, proportional
-  // fill, percent in kFontSmall to the left. Unknown reads draw "--%" and an
-  // empty body so the layout stays stable. Charging bolt when the BQ27220
-  // average current is positive (into the battery) — X4's ADC path has no
-  // gauge, readAvgCurrentMa returns false there and the bolt is simply off.
-  const int barH = kStatusH - 2;  // content height above the separator
+
+  const int barH = kStatusH - 2;
   uint16_t pct = 0;
   const bool havePct = battery().readPercentageChecked(pct);
   int16_t avgMa = 0;
@@ -173,12 +159,9 @@ void LauncherScene::render(Gfx& gfx) {
   const int battLeft = StatusBar::drawBattery(gfx, w - kMargin, barH,
                                               havePct ? static_cast<int>(pct) : -1, charging);
 
-  // M2: BLE status dot left of the battery cluster — solid filled dot when
-  // the iPhone is connected, hollow circle while advertising. Nothing before
-  // the radio starts (BLE begins after the first launcher paint; see main.cpp).
   int clockRight = battLeft;
   if (COMPANION_BLE.isStarted()) {
-    const int d = 12;  // circle drawn as a fully-rounded rect
+    const int d = 12;
     const int dotX = battLeft - d - 10;
     const int dotY = (barH - d) / 2;
     if (COMPANION_BLE.isConnected()) {
@@ -189,12 +172,6 @@ void LauncherScene::render(Gfx& gfx) {
     clockRight = dotX;
   }
 
-  // v0.4: local time (24h) left of the BLE dot, from the DS3231 seed or the
-  // phone's time.sync (ClockStore). It is sampled at repaint, not ticking: on
-  // e-ink a per-minute refresh would cost a panel flush a minute for a number
-  // nobody is watching. Wake and every scene switch repaint the bar, so the
-  // time is current whenever you come back to the launcher; a selection move
-  // only redraws tiles and leaves the bar (and the clock) as it was.
   char clock[16];
   if (clockFormatTime(clock, sizeof(clock))) {
     const int textW = gfx.textWidth(kFontRegular, clock);
@@ -203,52 +180,43 @@ void LauncherScene::render(Gfx& gfx) {
       gfx.drawText(kFontRegular, clockX, (barH - gfx.lineHeight(kFontRegular)) / 2 + 1, clock);
     }
   }
-  gfx.fillRect(0, kStatusH - 2, w, 2, true);  // separator
+  gfx.fillRect(0, kStatusH - 2, w, 2, true);
 
-  // --- App grid: square tiles with the LABEL INSIDE the rounded box ---------
-  // Each cell is a plain square (no separate label row) so three rows fit with
-  // room to spare. The tile side is the smaller of what the width and height
-  // budgets allow, capped at kMaxTileSide so five tiles read as comfortable
-  // cards rather than filling the panel; the whole block is then centered both
-  // ways between the status bar and the soft-key bar.
-  const int rows = gridRows();
+  // --- 2x3 App Grid Geometry ---
+  const int rows = ROWS;
   const int availTop = kStatusH;
   const int availH = h - Scene::SOFTKEY_BAR_H - availTop;
   const int sideFromW = (w - 2 * kMargin - (COLS - 1) * kGap) / COLS;
-  const int sideFromH = (availH - (rows - 1) * kGap) / rows;  // cellH == side now
+  const int sideFromH = (availH - (rows - 1) * kGap) / rows;
   int side = sideFromW < sideFromH ? sideFromW : sideFromH;
-  if (side > kMaxTileSide) side = kMaxTileSide;
-  const int cellH = side;  // label lives inside the tile
+  if (side > kMaxTileSide) side = kMaxTileSide;  // capped at 186 px
+  const int cellH = side;
 
   const int gridBlockW = COLS * side + (COLS - 1) * kGap;
   const int gridH = rows * cellH + (rows - 1) * kGap;
-  const int gridX = (w - gridBlockW) / 2;  // center horizontally
+  const int gridX = (w - gridBlockW) / 2;
   int gridY = availTop + (availH - gridH) / 2;
-  if (gridY < availTop + 4) gridY = availTop + 4;  // never collide with chrome
+  if (gridY < availTop + 4) gridY = availTop + 4;
 
-  // M2.1a: cache the layout for cellRect() (selection-move dirty rects).
   _gridX = static_cast<int16_t>(gridX);
   _gridY = static_cast<int16_t>(gridY);
   _side = static_cast<int16_t>(side);
   _cellH = static_cast<int16_t>(cellH);
 
-  // Draw at the native master size. Padding lives in the art itself; do not
-  // downscale here (a previous 88% draw used the wrong stride and scrambled
-  // every icon into static — Settings preview looked fine because it samples
-  // correctly from the 104px source).
-  const int iconSize = XPhoneLauncherIconSize;
+  const int iconSize = XPhoneLauncherIconSize;  // full 104 px
   const int labelLineH = gfx.lineHeight(kFontBold);
 
-  for (int i = 0; i < APP_COUNT; i++) {
-    const int col = i % COLS;
-    const int row = i / COLS;
+  const int curPage = _sel / PAGE_SIZE;
+  const int pageStart = curPage * PAGE_SIZE;
+  const int pageEnd = (pageStart + PAGE_SIZE < APP_COUNT) ? (pageStart + PAGE_SIZE) : APP_COUNT;
+
+  for (int i = pageStart; i < pageEnd; i++) {
+    const int pageIdx = i - pageStart;
+    const int col = pageIdx % COLS;
+    const int row = pageIdx / COLS;
     const int cx = gridX + col * (side + kGap);
     const int cy = gridY + row * (cellH + kGap);
 
-    // Rounded box = the near-full tile (small inset). Thin outline for every
-    // app, thick when selected. Icon and label both live inside it.
-    // Selection chrome only — unselected tiles have no outline so the icons
-    // read as a calm grid of glyphs rather than a wall of boxes.
     const int boxX = cx + kBoxInset;
     const int boxY = cy + kBoxInset;
     const int boxSide = side - 2 * kBoxInset;
@@ -256,19 +224,34 @@ void LauncherScene::render(Gfx& gfx) {
       gfx.drawRoundedRect(boxX, boxY, boxSide, boxSide, kSelRadius, kSelThick, true);
     }
 
-    // Icon centered horizontally, sitting in the region above the label. The
-    // label is pinned near the bottom inside the box; the icon is vertically
-    // centered in whatever space remains above it.
     const int iconAreaH = boxSide - 2 * kTilePad - labelLineH;
-    int iconY = boxY + kTilePad + (iconAreaH > iconSize ? (iconAreaH - iconSize) / 2 : 0);
+    const int iconY = boxY + kTilePad + (iconAreaH > iconSize ? (iconAreaH - iconSize) / 2 : 0);
     const int iconX = cx + (side - iconSize) / 2;
     if (const uint8_t* bmp = IconStyle::iconForApp(i)) {
       drawIcon(gfx, bmp, iconX, iconY, iconSize);
     }
 
-    // Label inside the box, near the bottom edge.
     const XpFont& f = (i == _sel) ? kFontBold : kFontRegular;
     const int labelY = boxY + boxSide - kTilePad - labelLineH;
     gfx.drawTextCentered(f, cx + side / 2, labelY, kApps[i]);
+  }
+
+  // --- Pagination Dots ---
+  constexpr int kTotalPages = (APP_COUNT + PAGE_SIZE - 1) / PAGE_SIZE;
+  if (kTotalPages > 1) {
+    constexpr int kDotRadius = 4;
+    constexpr int kDotGap = 12;
+    const int totalDotsW = kTotalPages * (2 * kDotRadius) + (kTotalPages - 1) * kDotGap;
+    const int dotStartX = (w - totalDotsW) / 2 + kDotRadius;
+    const int dotY = gridY + gridH + 14;
+
+    for (int p = 0; p < kTotalPages; p++) {
+      const int dx = dotStartX + p * (2 * kDotRadius + kDotGap);
+      if (p == curPage) {
+        gfx.fillRoundedRect(dx - kDotRadius, dotY - kDotRadius, 2 * kDotRadius, 2 * kDotRadius, kDotRadius, true);
+      } else {
+        gfx.drawRoundedRect(dx - kDotRadius, dotY - kDotRadius, 2 * kDotRadius, 2 * kDotRadius, kDotRadius, 1, true);
+      }
+    }
   }
 }

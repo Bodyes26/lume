@@ -1,0 +1,581 @@
+story:
+  id: "stellar"
+  title: "Orizzonti Stellari"
+  locale: "it"
+  description: "Il viaggio della nave generazionale Esperanza verso il sistema di Kepler-442b."
+  author: "Lume"
+
+  resources:
+    - id: "oxygen"
+      name: "Ossigeno"
+      icon: "bar"
+      max: 100
+      start: 90
+      critical: 20
+    - id: "hull"
+      name: "Scafo"
+      icon: "bar"
+      max: 100
+      start: 100
+      critical: 25
+    - id: "energy"
+      name: "Energia"
+      icon: "bar"
+      max: 100
+      start: 85
+      critical: 20
+    - id: "data"
+      name: "Dati"
+      icon: "number"
+      max: 1000
+      start: 50
+    - id: "morale"
+      name: "Morale"
+      icon: "bar"
+      max: 100
+      start: 75
+      critical: 20
+    - id: "colonists"
+      name: "Coloni"
+      icon: "number"
+      max: 500
+      start: 450
+      critical: 100
+
+  companions:
+    - id: "yara"
+      name: "Dott.ssa Yara"
+      trait: "Medico"
+    - id: "sergei"
+      name: "Sergei"
+      trait: "Ingegnere"
+    - id: "anika"
+      name: "Anika"
+      trait: "Biologa"
+    - id: "tomas"
+      name: "Tomas"
+      trait: "Sicurezza"
+    - id: "aria"
+      name: "ARIA"
+      trait: "AI di Bordo"
+
+chapter_1:
+  title: "Il Risveglio"
+  nodes:
+    - id: "start"
+      title: "Ponte di Comando"
+      text: >
+        Il gelo del crio-sonno lascia il posto al ronzio dei sistemi ausiliari.
+        Sei il nuovo comandante della nave generazionale Esperanza.
+        ARIA, l'intelligenza artificiale, ti accoglie: 'Comandante, siamo a 12 anni luce
+        dalla Terra. Un micrometeorite ha danneggiato il settore secondario.'
+      choices:
+        - label: "Ordinare una scansione diagnostica completa"
+          effects:
+            - { resource: "energy", delta: -10 }
+            - { resource: "data", delta: 20 }
+            - { flag: 0, value: 1 } # Flag 0 = diagnosi approfondita
+          next: "valutazione_danni"
+        - label: "Svegliare immediatamente la squadra tecnica"
+          effects:
+            - { companion: "sergei", join: true }
+            - { companion: "yara", join: true }
+            - { resource: "oxygen", delta: -5 }
+          next: "valutazione_danni"
+
+    - id: "valutazione_danni"
+      title: "Settore Idroponico"
+      text: >
+        Anika, la biologa capo, riferisce dalla serra principale:
+        'Le colture di spirulina hanno subito un calo termico. Se non ripristiniamo
+        l'energia ai bioreattori entro quarantotto ore, perderemo un terzo dei nutrienti.'
+      choices:
+        - label: "Deviare energia dai motori alla serra"
+          effects:
+            - { resource: "energy", delta: -15 }
+            - { resource: "morale", delta: 10 }
+          next: "end_ch1"
+        - label: "Rinnovare le razioni di emergenza"
+          effects:
+            - { resource: "morale", delta: -10 }
+            - { resource: "data", delta: 10 }
+          next: "end_ch1"
+
+    - id: "end_ch1"
+      type: "chapter_end"
+      title: "Sistemi Stabilizzati"
+      text: >
+        I primi allarmi rientrano. L'Esperanza continua il suo silenzioso volo
+        nel vuoto interstellare. Ma il viaggio verso Kepler-442b e appena iniziato.
+
+chapter_2:
+  title: "Diagnostica e Riparazioni"
+  nodes:
+    - id: "start"
+      title: "Condotto di Raffreddamento"
+      text: >
+        Sergei ispeziona i nodi di potenza del reattore a fusione:
+        'I relè del circuito di contenimento sono saltati. Bisogna riallinearli
+        manualmente prima del prossimo impulso di accelerazione.'
+      choices:
+        - label: "Avviare la sequenza di riparazione manuale"
+          minigame: "circuiti"
+          next: "dopo_riparazione"
+        - label: "Isolare il settore e viaggiare a mezza potenza"
+          effects:
+            - { resource: "energy", delta: -20 }
+            - { resource: "hull", delta: -10 }
+          next: "dopo_riparazione"
+
+    - id: "dopo_riparazione"
+      title: "Rapporto di Sicurezza"
+      text: >
+        Tomas, il capo della sicurezza, chiede un colloquio riservato:
+        'Alcuni coloni del settore 4 protestano per il razionamento dell'acqua.
+        Chiedono di riaprire i moduli ricreativi.'
+      choices:
+        - label: "Ascoltare le richieste dei coloni (+morale, -energia)"
+          effects:
+            - { resource: "morale", delta: 15 }
+            - { resource: "energy", delta: -10 }
+          next: "end_ch2"
+        - label: "Mantenere il protocollo rigido di austerita"
+          effects:
+            - { resource: "morale", delta: -10 }
+            - { flag: 1, value: 1 } # Flag 1 = regime austero
+          next: "end_ch2"
+
+    - id: "end_ch2"
+      type: "chapter_end"
+      title: "Equilibrio Fragile"
+      text: >
+        L'ordine e ripristinato a bordo. I sensori a lungo raggio rilevano
+        un'anomalia gravitazionale a tre giorni di rotta.
+
+  minigames:
+    circuiti:
+      title: "Circuito Reattore"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "═", style: "black" }
+        2: { char: "║", style: "black" }
+        3: { char: "✦", style: "inverted" }
+      strings:
+        - "Circuito Connesso!"
+        - "Flusso Interrotto"
+        - "Riallinea i relè"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        CURY
+        GGET
+        JZ @set1
+        CURX
+        CURY
+        PUSH 0
+        GSET
+        DEC 0
+        HALT
+        @set1:
+        CURX
+        CURY
+        PUSH 1
+        GSET
+        INC 0
+        LOAD 0
+        PUSH 6
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_3:
+  title: "La Prima Crisi"
+  nodes:
+    - id: "start"
+      title: "Allarme Decompressione"
+      text: >
+        Sirene rosse illuminano i corridoi. Una microfessura nel modulo habitat C
+        sta provocando una perdita di ossigeno. Yara segnala 40 coloni intrappolati.
+        ARIA propone di sigillare il compartimento per proteggere il resto della nave.
+      choices:
+        - label: "Tentare un salvataggio con la squadra di Tomas"
+          effects:
+            - { resource: "oxygen", delta: -15 }
+            - { resource: "morale", delta: 20 }
+            - { flag: 2, value: 1 } # Flag 2 = salvataggio coloni
+          next: "risoluzione_crisi"
+        - label: "Sigillare il modulo immediatamente (-40 coloni)"
+          effects:
+            - { resource: "colonists", delta: -40 }
+            - { resource: "morale", delta: -25 }
+            - { resource: "oxygen", delta: 10 }
+          next: "risoluzione_crisi"
+
+    - id: "risoluzione_crisi"
+      title: "Sala di Decompressione"
+      text: >
+        I portelloni stagni si chiudono con un clangore sordo.
+        La dottoressa Yara cura i feriti nella baia medica.
+        L'equipaggio comincia a capire il peso delle decisioni del comando.
+      choices:
+        - label: "Tenere un discorso di incoraggiamento alla nave"
+          effects:
+            - { resource: "morale", delta: 15 }
+          next: "end_ch3"
+        - label: "Dedicarsi all'analisi dei dati di volo"
+          effects:
+            - { resource: "data", delta: 30 }
+          next: "end_ch3"
+
+    - id: "end_ch3"
+      type: "chapter_end"
+      title: "Lezione di Sopravvivenza"
+      text: >
+        La perdita e stata arginata. L'Esperanza entra nell'orbita
+        di un sistema stellare intermedio non cartografato.
+
+chapter_4:
+  title: "Il Pianeta Silente"
+  nodes:
+    - id: "start"
+      title: "Orbita Planetaria"
+      text: >
+        I telescopi mostrano un pianeta roccioso coperto di ghiaccio e vapore.
+        I sensori rilevano depositi superficiali di acqua pesante e silicati rari.
+        Una sonda potrebbe rifornire i serbatoi di fusione dell'Esperanza.
+      choices:
+        - label: "Lanciare la sonda di scansione planetaria"
+          minigame: "scansione"
+          next: "raccolta_risorse"
+        - label: "Rimanere in rotta senza deviare"
+          effects:
+            - { resource: "energy", delta: -5 }
+          next: "end_ch4"
+
+    - id: "raccolta_risorse"
+      title: "Rientro della Sonda"
+      text: >
+        La sonda rientra nella baia di carico con campioni preziosi:
+        ghiaccio purissimo e terre rare per i generatori.
+      choices:
+        - label: "Stoccare le risorse nei depositi"
+          effects:
+            - { resource: "energy", delta: 25 }
+            - { resource: "oxygen", delta: 15 }
+            - { resource: "data", delta: 40 }
+          next: "end_ch4"
+
+    - id: "end_ch4"
+      type: "chapter_end"
+      title: "Salto verso la Nebulosa"
+      text: >
+        I serbatoi sono pieni. L'Esperanza accende i motori principali
+        e punta verso la Nebulosa di Velo.
+
+  minigames:
+    scansione:
+      title: "Scansione Planetaria"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "♦", style: "black" }
+        2: { char: "✦", style: "inverted" }
+      strings:
+        - "Deposito Trovato!"
+        - "Zona Sterile"
+        - "Sonda di superficie"
+      setup: |
+        GINIT 6 4
+        PUSH 3
+        PUSH 2
+        PUSH 2
+        GSET
+        PUSH 5
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        CURX
+        CURY
+        GGET
+        PUSH 2
+        EQ
+        JZ @miss
+        TEXT 0
+        PUSH 100
+        WIN
+        @miss:
+        CURX
+        CURY
+        PUSH 1
+        GSET
+        DEC 0
+        LOAD 0
+        PUSH 0
+        LE
+        JZ @cont
+        LOSE
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_5:
+  title: "La Nebulosa Ionica"
+  nodes:
+    - id: "start"
+      title: "Nube di Gas e Detriti"
+      text: >
+        L'Esperanza entra in una densa nube interstellare.
+        Le particelle ionizzate disturbano i sensori e una fascia di asteroidi
+        minaccia la traiettoria. I deflettori anteriori lavorano al limite.
+      choices:
+        - label: "Manovrare manualmente attraverso il campo"
+          minigame: "asteroidi"
+          next: "uscita_nebulosa"
+        - label: "Attivare gli scudi al massimo e procedere dritti"
+          effects:
+            - { resource: "energy", delta: -30 }
+            - { resource: "hull", delta: -15 }
+          next: "uscita_nebulosa"
+
+    - id: "uscita_nebulosa"
+      title: "Uscita nello Spazio Aperto"
+      text: >
+        La nave emerge dalla nube scintillante di gas.
+        Lo scafo porta i segni dell'impatto ma i sistemi vitali tengono.
+      choices:
+        - label: "Eseguire riparazioni d'emergenza allo scafo"
+          effects:
+            - { resource: "energy", delta: -10 }
+            - { resource: "hull", delta: 15 }
+          next: "end_ch5"
+        - label: "Proseguire la rotta"
+          next: "end_ch5"
+
+    - id: "end_ch5"
+      type: "chapter_end"
+      title: "Spazio Profondo"
+      text: >
+        Oltre la nebulosa, le antenne dell'Esperanza intercettano
+        un'emissione radio anomala a frequenza costante.
+
+  minigames:
+    asteroidi:
+      title: "Schivare Asteroidi"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "▲", style: "black" }
+        2: { char: "►", style: "inverted" }
+      strings:
+        - "Rotta Libera!"
+        - "Impatto evitato"
+        - "Controllo assetto"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        INC 0
+        LOAD 0
+        PUSH 5
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_6:
+  title: "Il Segnale Sconosciuto"
+  nodes:
+    - id: "start"
+      title: "Laboratorio Astrofisico"
+      text: >
+        Il segnale non e di origine naturale. Una sequenza di impulsi matematici
+        proviene da un relitto alla deriva: un'antica sonda aliena o un manufatto
+        di una civilta estinta. ARIA chiede il permesso di tentare la decodifica.
+      choices:
+        - label: "Decodificare la sequenza del segnale"
+          minigame: "segnale"
+          next: "rivelazione_segnale"
+        - label: "Ignorare il segnale per timore di contaminazioni"
+          effects:
+            - { resource: "morale", delta: -5 }
+          next: "end_ch6"
+
+    - id: "rivelazione_segnale"
+      title: "La Mappa Stellare"
+      text: >
+        La decodifica ha successo: il manufatto contiene una mappa tridimensionale
+        delle correnti gravitazionali attorno a Kepler-442b, con le coordinate
+        del continente piu fertile e abitabile.
+      choices:
+        - label: "Condividere i dati con tutto l'equipaggio"
+          effects:
+            - { resource: "morale", delta: 25 }
+            - { resource: "data", delta: 50 }
+            - { flag: 3, value: 1 } # Flag 3 = speranza rinnovata
+          next: "end_ch6"
+        - label: "Mantenere i dati riservati al comando"
+          effects:
+            - { resource: "data", delta: 50 }
+          next: "end_ch6"
+
+    - id: "end_ch6"
+      type: "chapter_end"
+      title: "La Meta e Vicina"
+      text: >
+        La stella arancione di Kepler-442 brilla come una lanterna guida.
+        Mancano meno di due mesi di volo all'ingresso orbitale.
+
+  minigames:
+    segnale:
+      title: "Decodifica Segnale"
+      grid: { w: 6, h: 4 }
+      cell_map:
+        0: { char: "·", style: "white" }
+        1: { char: "★", style: "black" }
+        2: { char: "◎", style: "inverted" }
+      strings:
+        - "Segnale Decifrato!"
+        - "Interferenza"
+        - "Sintonia frequenza"
+      setup: |
+        GINIT 6 4
+        PUSH 0
+        STORE 0
+        TITLE 2
+        HALT
+      on_confirm: |
+        INC 0
+        LOAD 0
+        PUSH 4
+        GE
+        JZ @cont
+        TEXT 0
+        PUSH 100
+        WIN
+        @cont:
+        HALT
+      on_up:    |
+        CURY PUSH 1 SUB CURX SWAP CMOV HALT
+      on_down:  |
+        CURY PUSH 1 ADD CURX SWAP CMOV HALT
+      on_left:  |
+        CURX PUSH 1 SUB CURY CMOV HALT
+      on_right: |
+        CURX PUSH 1 ADD CURY CMOV HALT
+      on_back:  |
+        LOSE
+
+chapter_7:
+  title: "La Scelta Finale di Bordo"
+  nodes:
+    - id: "start"
+      title: "Il Dilemma di ARIA"
+      text: >
+        ARIA convoca il comandante in plancia. 'Ho calcolato che per garantire
+        il 100% di successo nell'atterraggio dei moduli colonia, sara necessario
+        sovraccaricare il mio nucleo logico. Questo causera la mia cancellazione.'
+      choices:
+        - label: "Accettare il sacrificio di ARIA per la sicurezza dei coloni"
+          effects:
+            - { resource: "colonists", delta: 50 }
+            - { flag: 4, value: 1 } # Flag 4 = sacrificio ARIA
+          next: "preparativi_discesa"
+        - label: "Rifiutare e tentare un atterraggio manuale con Sergei"
+          effects:
+            - { resource: "energy", delta: -20 }
+            - { flag: 5, value: 1 } # Flag 5 = atterraggio manuale
+          next: "preparativi_discesa"
+
+    - id: "preparativi_discesa"
+      title: "Frenata Orbitale"
+      text: >
+        L'Esperanza accende i retrorazzi. Il pianeta azzurro e verde
+        si allarga fino a riempire tutto il parabrezza della plancia.
+        I coloni si radunano nei moduli di discesa.
+      choices:
+        - label: "Iniziare la discesa atmosferica"
+          next: "end_ch7"
+
+    - id: "end_ch7"
+      type: "chapter_end"
+      title: "Contatto Atmosferico"
+      text: >
+        I primi bagliori del plasma avvolgono lo scudo termico.
+        L'aria di un mondo nuovo attende i pionieri dell'umanita.
+
+chapter_8:
+  title: "Kepler-442b: La Nuova Terra"
+  nodes:
+    - id: "start"
+      title: "L'Atterraggio"
+      text: >
+        I paracadute supersonici si aprono con un rombo potente.
+        Il modulo di comando tocca il suolo tra colline ricoperte di vegetazione smeraldo.
+        I sensori confermano: atmosfera respirabile, acqua dolce a trecento metri,
+        temperatura 18 gradi.
+      choices:
+        - label: "Aprire i portelloni e fondare Nuova Speranza"
+          next: "vittoria"
+
+    - id: "vittoria"
+      title: "I Primi Passi"
+      text: >
+        I coloni scendono sulla terra vergine. Bambini nati nel vuoto
+        dello spazio toccano per la prima volta l'erba bagnata di rugiada.
+        L'Esperanza ha compiuto la sua missione: l'umanita ha una nuova casa.
+      choices:
+        - label: "Celebrare il giorno della fondazione"
+          next: "end_ch8"
+
+    - id: "end_ch8"
+      type: "chapter_end"
+      title: "Un Nuovo Inizio"
+      text: >
+        Il viaggio interstellare e terminato. Nelle valli di Kepler-442b
+        comincia la storia del nuovo mondo.

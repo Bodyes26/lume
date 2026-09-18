@@ -10,7 +10,9 @@ struct LumeApp: App {
             RootView(
                 bluetooth: model.bluetooth,
                 reminders: model.reminders,
-                today: model.today
+                sleep: model.sleep,
+                today: model.today,
+                trail: model.trail
             )
         }
     }

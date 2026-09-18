@@ -157,4 +157,43 @@ final class LumeProtocolTests: XCTestCase {
             handle: 17
         ))
     }
+
+    func testTrailCatalogPayloadEncodes() throws {
+        let stories = [
+            TrailStoryInfo(
+                id: "silk_road",
+                title: "La Via della Seta",
+                description: "Test",
+                chapterCount: 8,
+                locale: "it",
+                currentChapter: 0,
+                currentDay: 1,
+                isInstalled: true,
+                isCompleted: false,
+                fileSize: 19417
+            )
+        ]
+        let data = try LumeProtocol.makeTrailCatalog(stories: stories)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["type"] as? String, "trail.catalog")
+        let list = try XCTUnwrap(json["stories"] as? [[String: Any]])
+        XCTAssertEqual(list.count, 1)
+        XCTAssertEqual(list[0]["id"] as? String, "silk_road")
+        XCTAssertEqual(list[0]["title"] as? String, "La Via della Seta")
+        XCTAssertEqual(list[0]["chapters"] as? Int, 8)
+        XCTAssertEqual(list[0]["installed"] as? Bool, true)
+    }
+
+    func testTrailSaveActionDecodes() throws {
+        let raw = #"{"schemaVersion":1,"type":"trail.save","storyId":"silk_road","chapter":3,"save":"YWJjZGVmZ2hpams="}"#
+        let action = try LumeProtocol.decodeAction(Data(raw.utf8))
+
+        XCTAssertEqual(action, LumeDeviceAction(
+            schemaVersion: 1,
+            type: "trail.save",
+            storyId: "silk_road",
+            chapter: 3,
+            save: "YWJjZGVmZ2hpams="
+        ))
+    }
 }

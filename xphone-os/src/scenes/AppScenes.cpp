@@ -4,12 +4,18 @@
 #include "AboutScene.h"
 #include "BlockScene.h"
 #include "FileTransferScene.h"
+#include "GamesScene.h"
 #include "LauncherScene.h"
+#include "MinesScene.h"
+#include "NonogramScene.h"
 #include "NotificationsScene.h"
 #include "RemindersScene.h"
 #include "ReaderScene.h"
 #include "SettingsScene.h"
+#include "SudokuScene.h"
 #include "TodayScene.h"
+#include "TrailListScene.h"
+#include "TrailScene.h"
 #include "WorkoutScene.h"
 
 unsigned long gBootTotalMs = 0;
@@ -33,6 +39,12 @@ TodayScene gToday;
 WorkoutScene gWorkout;
 ReaderScene gReader;
 FileTransferScene gFileTransfer;
+GamesScene gGames;
+SudokuScene gSudoku;
+NonogramScene gNonogram;
+MinesScene gMines;
+TrailListScene gTrailList;
+TrailScene gTrailScene;
 }  // namespace
 
 void showLauncher() {
@@ -101,6 +113,63 @@ void stopFileTransferIfActive() {
   if (SCENES.active() == &gFileTransfer) gFileTransfer.stopAndRestart();
 }
 
+void showGames() {
+  gCurrentSceneId = SceneId::Games;
+  SCENES.switchTo(gGames);
+}
+
+// The three pastimes. switchTo() runs onEnter FIRST, so open() has to come
+// after it or the fresh board it builds would be wiped by the scene's own
+// reset — the same ordering showBlockDeepWork() depends on above.
+void showSudoku(const games::Tier tier, const bool daily) {
+  gCurrentSceneId = SceneId::Sudoku;
+  SCENES.switchTo(gSudoku);
+  gSudoku.open(tier, daily);
+}
+
+void showNonogram(const games::Tier tier, const bool daily) {
+  gCurrentSceneId = SceneId::Nonogram;
+  SCENES.switchTo(gNonogram);
+  gNonogram.open(tier, daily);
+}
+
+void showMines(const games::Tier tier, const bool daily) {
+  gCurrentSceneId = SceneId::Mines;
+  SCENES.switchTo(gMines);
+  gMines.open(tier, daily);
+}
+
+void showTrailList() {
+  gCurrentSceneId = SceneId::TrailList;
+  SCENES.switchTo(gTrailList);
+}
+
+void showTrailStory(const uint8_t* storyData, uint32_t storySize) {
+  gCurrentSceneId = SceneId::TrailGame;
+  SCENES.switchTo(gTrailScene);
+  gTrailScene.open(storyData, storySize);
+}
+
+void trailPersistSave() {
+  if (SCENES.active() == &gTrailScene) {
+    gTrailScene.persistSave();
+  }
+}
+
+// Sleep hook (Sleep::sleepNow): the in-progress DAILY board is the one piece of
+// game state that cannot be regenerated, so it goes to NVS before the loop dies.
+void gamesPersistDaily() {
+  Scene* const active = SCENES.active();
+  if (active == &gSudoku) {
+    gSudoku.persistDaily();
+  } else if (active == &gNonogram) {
+    gNonogram.persistDaily();
+  } else if (active == &gMines) {
+    gMines.persistDaily();
+  } else if (active == &gTrailScene) {
+    gTrailScene.persistSave();
+  }
+}
 // boot() restore dispatch. Each show*() re-runs the scene's onEnter, which
 // re-requests its companion data (Block/Priorities/Today/Notifications all do),
 // so a restored scene refreshes itself. Sub-view state (Settings picker,
@@ -115,6 +184,15 @@ void showSceneById(SceneId id) {
     case SceneId::About:         showAbout();         break;
     case SceneId::Reader:        showReader();        break;
     case SceneId::Workout:       showWorkout();       break;
+    case SceneId::Games:         showGames();         break;
+    // Restoring a pastime means restoring TODAY's board: the daily one is the
+    // only board that was persisted (free play is disposable by design), and
+    // waking straight back into it is the whole point of having saved it.
+    case SceneId::Sudoku:        showSudoku(games::kDailyTier, true);   break;
+    case SceneId::Nonogram:      showNonogram(games::kDailyTier, true); break;
+    case SceneId::Mines:         showMines(games::kDailyTier, true);    break;
+    case SceneId::TrailList:
+    case SceneId::TrailGame:     showTrailList();                       break;
     // FileTransfer deliberately NOT restored: waking straight into a scene
     // that would show a stale Idle menu (the radio never survives sleep)
     // helps nobody — fall through to the launcher.
@@ -135,6 +213,12 @@ const char* sceneName(SceneId id) {
     case SceneId::Reader:        return L10N("Reader", "Lettura");
     case SceneId::Workout:       return L10N("Workout", "Allenamento");
     case SceneId::FileTransfer:  return L10N("Transfer", "Trasferimento");
+    case SceneId::Games:         return L10N("Games", "Giochi");
+    case SceneId::Sudoku:        return L10N("Sudoku", "Sudoku");
+    case SceneId::Nonogram:      return L10N("Nonogram", "Nonogram");
+    case SceneId::Mines:         return L10N("Mines", "Campo minato");
+    case SceneId::TrailList:     return L10N("Adventures", "Avventure");
+    case SceneId::TrailGame:     return L10N("Adventure", "Avventura");
     case SceneId::Launcher:      return L10N("Launcher", "Home");
     default:                     return L10N("Launcher", "Home");
   }

@@ -330,9 +330,11 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
   gfx.drawTextCentered(kFontRegular, gfx.width() / 2, kHeaderH + 10 + gfx.lineHeight(kFontBold) + 4,
                        L10N("PREV / NEXT to try on glass", "PREC / SUCC per provare sullo schermo"));
 
-  // 3x2 mini launcher preview using the active pack (live — cycle applies immediately).
+  // Mini launcher preview using the active pack (live — cycle applies
+  // immediately). 7 apps in 2 columns = 4 rows; the block ends at
+  // gridY 134 + 4*94 + 3*16 = 558, well clear of the soft-key bar at 748.
   constexpr int kCols = 2;
-  constexpr int kRows = 3;
+  constexpr int kRows = (XPhoneIconAppCount + kCols - 1) / kCols;
   constexpr int kPreviewIcon = 72;  // scaled-down blit of the 104px masters
   constexpr int kGap = 16;
   constexpr int kLabelH = 18;
@@ -345,16 +347,18 @@ void SettingsScene::renderIconStyle(Gfx& gfx) {
 
   // MUST track the icon-pack COLUMN order, since the loop below pairs
   // kLabels[i] with IconStyle::iconForApp(i) -> XPhoneIconPacks[pack][i]:
-  // Today, Notifications, Reminders, Block, Read, Workout (LauncherIcons.h:2272-2273,
-  // the launcher's own kApps in LauncherScene.cpp:24-26). The stale prose at
-  // LauncherIcons.h:6-7 lists a different order — the table is what indexes.
-  static constexpr const char* kLabels[6] = {L10N("Today", "Oggi"),  L10N("Notif", "Notif"), L10N("Reminders", "Promemoria"),
-                                             L10N("Block", "Focus"), L10N("Read", "Leggi"),  L10N("Workout", "Allenamento")};
+  // Today, Notifications, Reminders, Block, Read, Workout, Games
+  // (LauncherIcons.h's XPhoneIconPacks table, and the launcher's own kApps in
+  // LauncherScene.cpp). The table is what indexes, so add a label here for
+  // every column added there.
+  static constexpr const char* kLabels[XPhoneIconAppCount] = {L10N("Today", "Oggi"),  L10N("Notif", "Notif"), L10N("Reminders", "Promemoria"),
+                                                             L10N("Block", "Focus"), L10N("Read", "Leggi"),  L10N("Workout", "Allenamento"),
+                                                             L10N("Games", "Giochi")};
 
   // Downscale 104 -> 72 by nearest-neighbor sampling into a stack buffer of
   // one destination row, then draw. Keeps the preview cheap (no heap).
   const int srcSize = XPhoneLauncherIconSize;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < XPhoneIconAppCount; i++) {
     const int col = i % kCols;
     const int row = i / kCols;
     const int cx = gridX + col * (cellW + kGap);

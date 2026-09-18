@@ -28,6 +28,7 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
 
     private let reminders: RemindersStore
     private let today: TodayStore
+    private let trail: TrailStore
     private let defaults: UserDefaults
     private let lastPeripheralKey = "lume.lastPeripheralIdentifier.v2"
 
@@ -58,10 +59,12 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
     init(
         reminders: RemindersStore,
         today: TodayStore,
+        trail: TrailStore? = nil,
         defaults: UserDefaults = .standard
     ) {
         self.reminders = reminders
         self.today = today
+        self.trail = trail ?? TrailStore(defaults: defaults)
         self.defaults = defaults
         super.init()
         central = CBCentralManager(
@@ -224,6 +227,43 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
             lastError = error.localizedDescription
         }
     }
+    func syncSleepConfig(_ config: SleepConfig) {
+        guard let peripheral = connectedPeripheral else { return }
+        do {
+            let maximum = peripheral.maximumWriteValueLength(for: .withResponse)
+            let payload = try LumeProtocol.makeSleepConfig(
+                config: config,
+                maximumPayloadBytes: maximum
+            )
+            enqueue([payload], marksLastAsSynced: true)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func syncTrailCatalog() {
+        guard let _ = connectedPeripheral else { return }
+        do {
+            let payload = try LumeProtocol.makeTrailCatalog(stories: trail.stories)
+            enqueue([payload], marksLastAsSynced: true)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func restoreTrailSave(storyId: String) {
+        guard let _ = connectedPeripheral, let save = trail.getSave(for: storyId) else { return }
+        do {
+            let payload = try LumeProtocol.makeTrailSaveRestore(
+                storyId: storyId,
+                saveBase64: save.base64EncodedString()
+            )
+            enqueue([payload], marksLastAsSynced: true)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
 
     private func enqueue(_ payloads: [Data], marksLastAsSynced: Bool) {
         guard !payloads.isEmpty else { return }
@@ -349,6 +389,17 @@ final class LumeBluetoothManager: NSObject, ObservableObject {
                 _ = await reminders.complete(handle: handle, generation: gen)
                 sendReminders()
             }
+            break
+        case "trail.save":
+            if let storyId = action.storyId,
+               let chapter = action.chapter,
+               let saveB64 = action.save,
+               let saveData = Data(base64Encoded: saveB64) {
+                trail.handleDeviceSave(storyId: storyId, chapter: chapter, saveData: saveData)
+            }
+            break
+        case "trail.catalog.request":
+            syncTrailCatalog()
             break
         default:
             break
