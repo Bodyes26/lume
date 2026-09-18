@@ -410,15 +410,142 @@ void CompanionBleService::stopAdvertising() {
 }
 
 void CompanionBleService::shutdownForTransfer() {
-  shutdownRadio(/*releaseMemory=*/true, L10N("File Transfer", "Trasferimento file"));
+  shutdownRadio(/*releaseMemory=*/false, L10N("File Transfer", "Trasferimento file"));
 }
+
+void CompanionBleService::queueTransferStatus(const char* state, const char* detail) {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  snprintf(pendingTransferState, sizeof(pendingTransferState), "%s", state ? state : "");
+  snprintf(pendingTransferDetail, sizeof(pendingTransferDetail), "%s", detail ? detail : "");
+  xSemaphoreGive(stateMutex);
+}
+
+void CompanionBleService::resumeAfterTransfer(const char* pendingState, const char* pendingDetail) {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  snprintf(pendingTransferState, sizeof(pendingTransferState), "%s", pendingState ? pendingState : "");
+  snprintf(pendingTransferDetail, sizeof(pendingTransferDetail), "%s", pendingDetail ? pendingDetail : "");
+  xSemaphoreGive(stateMutex);
+  resumeAfterReader();
+}
+
+bool CompanionBleService::takeTransferTarget(char* ssid, size_t ssidSize, char* pass, size_t passSize,
+                                             bool* hotspotFallback) {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  const bool has = transferTargetSsid[0] != '\0';
+  snprintf(ssid, ssidSize, "%s", transferTargetSsid);
+  snprintf(pass, passSize, "%s", transferTargetPass);
+  if (hotspotFallback) *hotspotFallback = transferHotspotFallback;
+  transferTargetSsid[0] = '\0';
+  transferTargetPass[0] = '\0';
+  transferHotspotFallback = false;
+  xSemaphoreGive(stateMutex);
+  return has;
+}
+
+void CompanionBleService::setTransferTarget(const char* ssid, const char* pass) {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  snprintf(transferTargetSsid, sizeof(transferTargetSsid), "%s", ssid ? ssid : "");
+  snprintf(transferTargetPass, sizeof(transferTargetPass), "%s", pass ? pass : "");
+  xSemaphoreGive(stateMutex);
+}
+
+void CompanionBleService::setTransferHotspotFallback(bool on) {
+  ensureMutex();
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  transferHotspotFallback = on;
+  xSemaphoreGive(stateMutex);
+}
+
+void CompanionBleService::sendWifiTest(const char* ssid) {
+  if (!isConnected() || !actionCharacteristic || !ssid) return;
+  JsonDocument doc;
+  doc["schemaVersion"] = 1;
+  doc["type"] = "wifi.test";
+  doc["ssid"] = ssid;
+  String json;
+  serializeJson(doc, json);
+  actionCharacteristic->setValue(json);
+  actionCharacteristic->notify();
+  LOG_INF("X4CMP", "wifi.test sent for %s", ssid);
+}
+
+void CompanionBleService::sendWifiRequest() {
+  if (!isConnected() || !actionCharacteristic) return;
+  actionCharacteristic->setValue("{\"schemaVersion\":1,\"type\":\"wifi.request\"}");
+  actionCharacteristic->notify();
+  LOG_INF("X4CMP", "wifi.request sent");
+}
+
+void CompanionBleService::sendWifiForgot(const char* ssid) {
+  if (!isConnected() || !actionCharacteristic || !ssid) return;
+  JsonDocument doc;
+  doc["schemaVersion"] = 1;
+  doc["type"] = "wifi.forgot";
+  doc["ssid"] = ssid;
+  String json;
+  serializeJson(doc, json);
+  actionCharacteristic->setValue(json);
+  actionCharacteristic->notify();
+  LOG_INF("X4CMP", "wifi.forgot sent for %s", ssid);
+}
+
+void CompanionBleService::tickAdvWatchdog() {
+  if (!started || !advertising) return;
+  if (!connected && !advertising->isAdvertising()) {
+    advertising->start();
+  }
+}
+void CompanionBleService::notifyReaderHl(const char* key, uint32_t cid, uint32_t day, bool removed) {
+  if (!isConnected() || !actionCharacteristic || !isEncrypted()) return;
+  char json[160];
+  snprintf(json, sizeof(json),
+           "{\"schemaVersion\":1,\"type\":\"reader.hl\",\"key\":\"%s\",\"cid\":%lu,"
+           "\"day\":%lu,\"removed\":%s}",
+           key, static_cast<unsigned long>(cid), static_cast<unsigned long>(day),
+           removed ? "true" : "false");
+  actionCharacteristic->setValue(json);
+  actionCharacteristic->notify();
+}
+
+void CompanionBleService::queueReaderPos(const char* key, uint16_t page, uint16_t count,
+                                         uint32_t cid, uint16_t min) {
+  snprintf(posOut.key, sizeof(posOut.key), "%s", key);
+  posOut.page = page;
+  posOut.count = count;
+  posOut.cid = cid;
+  posOut.min = min;
+  posValid = true;
+  posDirty = true;
+}
+
+void CompanionBleService::clearReaderPos() {
+  posValid = false;
+  posDirty = false;
+}
+
+void CompanionBleService::queueReaderPlace(const char* key, uint32_t page, uint32_t pageCount) {
+  if (!key || key[0] == '\0') return;
+  snprintf(pendingOut.key, sizeof(pendingOut.key), "%s", key);
+  pendingOut.page = page;
+  pendingOut.pageCount = pageCount;
+  pendingOut.seq = ++placeSeq;
+  pendingOut.atMillis = 0;
+  outPlacePending = true;
+}
+
+
 
 void CompanionBleService::suspendForReader() {
   shutdownRadio(/*releaseMemory=*/false, L10N("Reading", "Lettura"));
   releaseReaderTransients();
 }
 
-void CompanionBleService::releaseReaderTransients() {
+void CompanionBleService::releaseReaderTransients(bool radioUp) {
+  (void)radioUp;
   // The reader is about to claim one contiguous 32 KB inflate window from
   // the plain that deinit just returned. Any heap block this service still
   // owns from the connected era sits INSIDE that plain and splits it —

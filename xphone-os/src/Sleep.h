@@ -46,9 +46,8 @@ namespace Sleep {
 // RTC memory did not. boot() calls this once: returns true and writes `sceneId`
 // when a saved key is present (and REMOVES the key so the next cold boot with
 // no prior sleep goes to the launcher); false when no key is stored. Kept as a
-// plain uint32_t so Sleep does not depend on the SceneId enum.
 bool consumeRestoreScene(uint32_t& sceneId);
-
+void armRestoreScene(uint32_t sceneId);
 // M4.3 wake-from-active-block. sleepNow() persists a tiny Block snapshot
 // (active/onBreak/preset/endsAtLabel/duration/remaining) to the same NVS
 // namespace when BLOCK_STATUS is active, and clears those keys when it is not.

@@ -734,6 +734,13 @@ void sleepNow(Gfx& gfx, Input& input) {
   }
 }
 
+void armRestoreScene(uint32_t sceneId) {
+  Preferences prefs;
+  if (!prefs.begin(kPrefsNamespace, /*readOnly=*/false)) return;
+  prefs.putUInt(kPrefsSceneKey, sceneId);
+  prefs.end();
+}
+
 bool consumeRestoreScene(uint32_t& sceneId) {
   Preferences prefs;
   if (!prefs.begin(kPrefsNamespace, /*readOnly=*/false)) return false;

@@ -17,7 +17,7 @@
 #include "TrailListScene.h"
 #include "TrailScene.h"
 #include "WorkoutScene.h"
-
+#include "WifiScene.h"
 unsigned long gBootTotalMs = 0;
 
 // M4.2 last-scene restore: updated by every show*() helper below.
@@ -43,8 +43,9 @@ GamesScene gGames;
 SudokuScene gSudoku;
 NonogramScene gNonogram;
 MinesScene gMines;
-TrailListScene gTrailList;
-TrailScene gTrailScene;
+  TrailListScene gTrailList;
+  TrailScene gTrailScene;
+  WifiScene gWifi;
 }  // namespace
 
 void showLauncher() {
@@ -104,15 +105,28 @@ void showFileTransfer() {
 }
 
 void showFileTransferAutoStart() {
-  gCurrentSceneId = SceneId::FileTransfer;
   SCENES.switchTo(gFileTransfer);  // onEnter resets to Idle
   gFileTransfer.autoStart();       // then bring the radio up (STA or hotspot)
 }
 
-void stopFileTransferIfActive() {
-  if (SCENES.active() == &gFileTransfer) gFileTransfer.stopAndRestart();
+void showFileTransferAutoStartDirect() {
+  gCurrentSceneId = SceneId::FileTransfer;
+  SCENES.switchTo(gFileTransfer);
+  gFileTransfer.autoStartDirect();
 }
 
+void stopFileTransferIfActive() {
+  if (SCENES.active() == &gFileTransfer) gFileTransfer.stopSession();
+}
+
+void showWifi() {
+  gCurrentSceneId = SceneId::Wifi;
+  SCENES.switchTo(gWifi);
+}
+
+void showSceneByIdQuiet(const SceneId id) {
+  showSceneById(id);
+}
 void showGames() {
   gCurrentSceneId = SceneId::Games;
   SCENES.switchTo(gGames);
@@ -184,8 +198,8 @@ void showSceneById(SceneId id) {
     case SceneId::About:         showAbout();         break;
     case SceneId::Reader:        showReader();        break;
     case SceneId::Workout:       showWorkout();       break;
+    case SceneId::Wifi:          showWifi();          break;
     case SceneId::Games:         showGames();         break;
-    // Restoring a pastime means restoring TODAY's board: the daily one is the
     // only board that was persisted (free play is disposable by design), and
     // waking straight back into it is the whole point of having saved it.
     case SceneId::Sudoku:        showSudoku(games::kDailyTier, true);   break;

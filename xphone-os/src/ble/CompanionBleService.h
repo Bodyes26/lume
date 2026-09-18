@@ -48,11 +48,20 @@ class CompanionBleService final {
   // aborted the firmware). One-way until reboot — the transfer session
   // already ends with esp_restart(), which brings BLE back.
   void shutdownForTransfer();
-
-  // Reader <-> radio time-sharing (CrossPoint's model). The X3 has no PSRAM;
-  // with BLE+ANCS resident the reader can't get its 32 KB inflate window +
-  // parser buffers, so first-time chapter indexing fails. The Reader scene
-  // suspends BLE on entry (deinit keeps memory so no reboot is needed) and
+  void resumeAfterTransfer(const char* pendingState, const char* pendingDetail);
+  void queueTransferStatus(const char* state, const char* detail);
+  bool takeTransferTarget(char* ssid, size_t ssidSize, char* pass, size_t passSize, bool* hotspotFallback = nullptr);
+  void setTransferTarget(const char* ssid, const char* pass);
+  void setTransferHotspotFallback(bool on);
+  void sendWifiTest(const char* ssid);
+  void sendWifiRequest();
+  void sendWifiForgot(const char* ssid);
+  void tickAdvWatchdog();
+  void notifyReaderHl(const char* key, uint32_t cid, uint32_t day, bool removed);
+  void queueReaderPos(const char* key, uint16_t page, uint16_t count, uint32_t cid, uint16_t min);
+  void clearReaderPos();
+  void queueReaderPlace(const char* key, uint32_t page, uint32_t pageCount);
+  void releaseReaderTransients(bool radioUp = false);
   // resumes it on exit.
   void suspendForReader();
   void resumeAfterReader();
@@ -62,7 +71,6 @@ class CompanionBleService final {
   // split the contiguous 32 KB the reader needs (measured on X3). All of it
   // is recoverable — parsed stores are fixed buffers, NVS keeps the last
   // real card, the phone re-pushes on reconnect.
-  void releaseReaderTransients();
 
   bool isStarted() const { return started; }
   bool isConnected() const;
@@ -189,7 +197,30 @@ class CompanionBleService final {
   // R2 Read — main-loop-only latches (see consumeShelfRequest above).
   bool shelfRequested = false;
   TransferRequest transferRequest = TransferRequest::None;
-
+  char pendingTransferState[16] = {0};
+  char pendingTransferDetail[40] = {0};
+  char transferTargetSsid[64] = {0};
+  char transferTargetPass[64] = {0};
+  bool transferHotspotFallback = false;
+  struct {
+    char key[64] = {0};
+    uint16_t page = 0;
+    uint16_t count = 0;
+    uint32_t cid = 0;
+    uint16_t min = 0;
+  } posOut;
+  bool posValid = false;
+  bool posDirty = false;
+  uint32_t posLastSentMs = 0;
+  struct {
+    char key[64] = {0};
+    uint32_t page = 0;
+    uint32_t pageCount = 0;
+    uint32_t seq = 0;
+    uint32_t atMillis = 0;
+  } pendingOut;
+  bool outPlacePending = false;
+  uint32_t placeSeq = 0;
   // Security pump state — written from the NimBLE host task (arm/disarm/
   // encryption-change) and the main loop (processPending), so every touch
   // holds stateMutex.

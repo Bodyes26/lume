@@ -1,7 +1,10 @@
 #include "ReaderScene.h"
 
+#include "../BootTrace.h"
 #include "../CpuBoost.h"
-
+#include "../RadioPolicy.h"
+#include <BatteryMonitor.h>
+#include "../LumeLocale.h"
 // xphone-os Reader R2a — scene over the CrossPoint engine port (src/reader).
 //
 // Flow:
@@ -56,7 +59,11 @@
 #include "../Fonts.h"
 #include "../ble/CompanionBleService.h"
 #include "../reader/CoverThumb.h"
+#include "../reader/FbpBook.h"
+#include "../reader/Highlights.h"
+#include "../ClockStore.h"
 #include "../reader/ReadingStats.h"
+#include "../reader/Dictionary.h"
 #include "../reader/Epub.h"
 #include "../reader/Page.h"
 #include "../reader/ProgressFile.h"
@@ -67,6 +74,9 @@
 #include "../reader/ReaderSmokeTest.h"
 #endif
 #include "AppScenes.h"
+#ifdef FLOWE_PREPARED_GUIDE
+#include "../PreparedReaderGuide.h"
+#endif
 
 namespace {
 
@@ -74,12 +84,48 @@ namespace {
 constexpr const char* kPrefsNamespace = "xphone";
 constexpr const char* kPrefsBookKey = "rdBook";
 constexpr const char* kPrefsFontKey = "rdFont";  // reader fontId (0/1/2)
+// Reading orientation is GLOBAL and sticky, the way Kindle, Kobo and
+// CrossPoint all scope it — rotation is a fact about the device you are
+// holding, not about the book (docs/research/2026-08-16-orientation-scope.md).
+// A book whose package carries no landscape profiles opens portrait WITHOUT
+// clearing this: the preference records intent, the package decides capability.
+constexpr const char* kPrefsLandKey = "rdLand";  // 1 = landscape
+// Soft-key labels while reading a page (flowe-os#41): some readers want the
+// page and nothing else. Menus keep their labels — a menu you cannot read is
+// broken, but a page turn is a habit the hands already know.
+constexpr const char* kPrefsKeysKey = "rdKeys";  // 1 = show the bar (default)
+constexpr const char* kPrefsFooterKey = "rdFoot";  // footer mode 0-3 (default 3: chapter time)
 
 // Layout (logical portrait). The text viewport is part of the section.bin
 // cache key (settings-in-header), so these only change with a cache rebuild.
 constexpr int kMarginX = 24;
 constexpr int kMarginTop = 24;
-constexpr int kStatusH = 24;  // status line strip above the soft-key bar
+constexpr int kStatusH = 24;  // footer strip above the soft-key bar (landscape fbp)
+// Reading chrome v3: the page owns the panel down to this reserve. The bare
+// labels' ink spans roughly the bottom 17 px (band mid at h-12), so 30 keeps
+// a clear 13 px between the last text line and the chrome. The reading page
+// deliberately ignores SOFTKEY_BAR_H — it draws its own chrome there.
+// Matches bookc's portrait margin_bot (compile.c kGeometries) on purpose.
+constexpr int kReadingBottomH = 30;
+
+// Right edge available to page content: in landscape the soft-key column
+// occupies that side, so every full-page screen has to stop before it.
+// The buttons do not move when the panel rotates, so the content viewport
+// is the panel MINUS that column — this is the width every landscape
+// profile is compiled for.
+int contentRight(Gfx& gfx, int margin) {
+  const int reserve = gfx.orientation() == Gfx::Orient::Landscape ? Scene::SOFTKEY_BAR_H : 0;
+  return gfx.width() - reserve - margin;
+}
+
+// The partner rule for the BOTTOM edge. Portrait reserves the soft-key bar
+// there; landscape does not, because the keys moved to the right — so a
+// landscape screen that still subtracted SOFTKEY_BAR_H left a 44 px white
+// band along the bottom and squeezed its content for nothing.
+int contentBottom(Gfx& gfx, int margin) {
+  const int reserve = gfx.orientation() == Gfx::Orient::Landscape ? 8 : Scene::SOFTKEY_BAR_H;
+  return gfx.height() - reserve - margin;
+}
 
 // Book list — 2x2 cover grid. Tile w/h derive from the panel (X3: 264x351,
 // X4: 240x355); the thumb target box is a fixed constant because it names the
@@ -87,21 +133,55 @@ constexpr int kStatusH = 24;  // status line strip above the soft-key bar
 // for a bold title line + a small author line under the cover without the
 // text crossing the selection border.
 constexpr int kListMarginX = 20;
+
+// A small page-turn arrow for the reading band (drawn at the key centres).
+static void drawMiniArrow(Gfx& gfx, int cx, int cy, bool right) {
+  constexpr int len = 12;
+  constexpr int half = len / 2;
+  constexpr int head = (len * 5) / 12;
+  gfx.fillRect(cx - half, cy - 1, len, 2, true);
+  for (int i = 0; i < head; i++) {
+    const int x = right ? cx + half - 1 - i : cx - half + i;
+    gfx.fillRect(x, cy - i, 1, 2 * i + 1, true);
+  }
+}
 constexpr int kHeaderH = 46;
+// Chapters list: holding a direction JUMPS five at a time, repainting each
+// jump. The first attempt scrolled one-by-one and stayed silent until the key
+// came up, which read as the button doing nothing at all — worse than the
+// sluggishness it replaced. Five per paint is a step the panel can actually
+// show, so a long list moves quickly AND visibly.
+constexpr uint32_t kTocRepeatDelayMs = 500;  // < the 550 ms long-press threshold, so no dead zone
+constexpr uint32_t kTocRepeatRateMs = 900;   // ~one jump per refresh
+constexpr int kTocJumpStride = 5;
+
 constexpr int kGridCols = 2;
 constexpr int kGridRows = 2;
 // Concept A stats band (docs/plans/2026-07-29-reading-stats-design.md):
 // one compact line — streak + pages-today inline, Mon–Sun week bars right —
 // between the header and the shelf. 56px: the 260px thumb bitmaps are fixed,
 // so every band pixel comes out of tile text room (84px overlapped, live X4).
-constexpr int kStatsBandH = 56;
+// Stats band. 46, not 56 (Andrew, 2026-08-17: "in general the font in that
+// area could be a little smaller, so it is overall tighter"). 10 pt IS the
+// smallest face the firmware has — there are only three — so "smaller" is
+// bought with tighter bars, a tighter letter pitch and a shorter band. The
+// old 56 did not even fit its own contents: bars 26 + letters + the today
+// underline came to 60 and the underline crossed the band rule. Every
+// pixel freed here goes to the tiles, whose budget was equally tight.
+constexpr int kStatsBandH = 46;
 constexpr int kThumbW = 200;      // cover thumb target box (aspect-fit inside)
 constexpr int kThumbH = 260;
-constexpr int kSelInset = 6;      // selection border inset from the tile edge
+constexpr int kSelInset = 3;      // selection border inset from the cover box
 constexpr int kSelRadius = 10;
 constexpr int kSelThick = 3;
-constexpr int kThumbTop = 8;      // tile top -> thumb box (tightened for the stats band)
-constexpr int kTitleGap = 6;      // thumb box bottom -> title line
+constexpr int kThumbTop = 6;      // tile top -> thumb box (tightened for the stats band)
+// Thumb box bottom -> title line. The tile budget is exact and it does not
+// forgive: on the X3 a tile is (792 - 46 header - 56 band - 44 keys) / 2 = 323
+// px, and the contents are kThumbTop + 260 cover + kTitleGap + 29 title + 24
+// author. At the old 8/6 those came to 329 — six px MORE than the tile — so
+// the author line ran under the next row, where the row below's selection
+// border then sliced through it. Every one of these numbers is load-bearing.
+constexpr int kTitleGap = 4;
 constexpr int kTileTextPad = 14;  // horizontal padding for tile text
 
 bool endsWithEpubCI(const char* name) {
@@ -112,9 +192,60 @@ bool endsWithEpubCI(const char* name) {
          tolower(ext[4]) == 'b';
 }
 
+bool endsWithFbpCI(const char* name) {
+  const size_t len = strlen(name);
+  if (len < 5) return false;
+  const char* ext = name + len - 4;
+  return ext[0] == '.' && tolower(ext[1]) == 'f' && tolower(ext[2]) == 'b' && tolower(ext[3]) == 'p';
+}
+
 const char* baseName(const char* path) {
   const char* slash = strrchr(path, '/');
   return slash ? slash + 1 : path;
+}
+
+// Filename -> display title, the apps' prettify rule: URL-decode, '+'/'_'
+// become spaces, the Calibre " -- author" tail drops, the extension drops,
+// runs of spaces collapse. For the fallback path only — real metadata wins.
+void prettyFileTitle(const char* path, char* out, const size_t outSize) {
+  const char* name = baseName(path);
+  size_t w = 0;
+  bool pendingSpace = false;
+  for (size_t r = 0; name[r] != '\0' && w + 1 < outSize;) {
+    char c = name[r];
+    if (c == '%' && isxdigit(static_cast<uint8_t>(name[r + 1])) &&
+        isxdigit(static_cast<uint8_t>(name[r + 2]))) {
+      const char hex[3] = {name[r + 1], name[r + 2], '\0'};
+      c = static_cast<char>(strtol(hex, nullptr, 16));
+      r += 3;
+    } else {
+      r += 1;
+    }
+    if (c == '+' || c == '_') c = ' ';
+    if (c == ' ') {
+      if (w > 0) pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace && w + 2 < outSize) { out[w++] = ' '; pendingSpace = false; }
+    out[w++] = c;
+  }
+  out[w] = '\0';
+  char* dashes = strstr(out, " -- ");
+  if (dashes) *dashes = '\0';
+  // Strip EVERY container extension, not only the last one. A sideloaded
+  // "alice.epub.fbp" used to reach the shelf as "alice.epub": the tile named
+  // a file format at a reader, which is the app's job to hide. .pdf and the
+  // like keep their extension on purpose — those are files the reader
+  // recognises as files, not books we compiled.
+  for (;;) {
+    char* dot = strrchr(out, '.');
+    if (!dot || dot == out) break;
+    if (strcasecmp(dot, ".epub") != 0 && strcasecmp(dot, ".fbp") != 0 &&
+        strcasecmp(dot, ".txt") != 0) {
+      break;
+    }
+    *dot = '\0';
+  }
 }
 
 // Copy `src` into `dst`, chopping whole UTF-8 sequences and appending "..."
@@ -128,6 +259,8 @@ void truncateToWidth(Gfx& gfx, const XpFont& font, const char* src, int maxWidth
       len--;
     } while (len > 0 && (static_cast<uint8_t>(dst[len]) & 0xC0) == 0x80);
     dst[len] = '\0';
+    // Trim the space the chop can leave, so tiles never read "Alice ..."
+    while (len > 0 && dst[len - 1] == ' ') dst[--len] = '\0';
     char probe[128];
     snprintf(probe, sizeof(probe), "%s...", dst);
     if (gfx.textWidth(font, probe) <= maxWidth) {
@@ -154,6 +287,35 @@ bool readThumbDims(const char* binPath, uint16_t* w, uint16_t* h) {
   return true;
 }
 
+// F6 (2026-08-19): publish a raw EPUB's cover thumb beside the book as
+// <path>.cov, the same place and format a compiled package's lands in.
+//
+// The phone shows covers for books that live only on the card by fetching
+// that sidecar over the file-transfer server. A package already writes one
+// (FbpBook::ensureShelfSidecars); an EPUB's thumb only ever existed inside
+// the reader's cache directory, which the server does not serve — so a
+// sideloaded EPUB stayed a blank tile on the phone. One copy of about 6 KB,
+// once per book, and only when the thumb has just been built.
+void publishCoverSidecar(const char* bookPath, const char* thumbPath) {
+  char cov[192];
+  if (snprintf(cov, sizeof(cov), "%s.cov", bookPath) >= static_cast<int>(sizeof(cov))) return;
+  if (SdMan.exists(cov)) return;
+  FsFile src = SdMan.open(thumbPath, O_RDONLY);
+  if (!src) return;
+  FsFile dst = SdMan.open(cov, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!dst) {
+    src.close();
+    return;
+  }
+  uint8_t buf[256];
+  int n;
+  bool ok = true;
+  while (ok && (n = src.read(buf, sizeof(buf))) > 0) ok = dst.write(buf, n) == n;
+  src.close();
+  dst.close();
+  if (!ok) SdMan.remove(cov);
+}
+
 }  // namespace
 
 // --- Lifecycle ---------------------------------------------------------------
@@ -162,15 +324,15 @@ ReaderScene::ReaderScene() = default;   // Epub/Section/TextMeasure complete her
 ReaderScene::~ReaderScene() = default;
 
 void ReaderScene::onEnter() {
-  // Radio and reader take turns for the WHOLE scene — grid included. The
-  // BLE-connected-shelf experiment died on live X3 numbers: with the static
-  // 32 KB dict resident, full BLE+ANCS bring-up beside even a torn-down
-  // Reader left 1,352 B free (min 448) — every connection-time malloc
-  // failed, iOS hung at "discovering services", reconnect churn fragmented
-  // the rest. The stack barely fits at boot (~6 KB margin); it cannot share
-  // the scene with anything. Phone sync happens from home and every
-  // non-Reader scene, one Back press away.
-  suspendRadioForBookWork();
+  // Radio policy (rewritten 2026-08-18, Andrew's call): READING KEEPS THE
+  // RADIO. Since glyph right-sizing a composed fbp page peaks ~11 KB and
+  // the 32 KB inflate window is lent from the static framebuffer, a book
+  // fits beside BLE+ANCS. Only two paths still take turns with the radio:
+  // the shelf (the ~58 KB cover-decoder scratch) and the EPUB reader
+  // (expat + indexing want the whole heap). The old whole-scene shutdown
+  // predates both fixes; its numbers (1,352 B free beside the static dict)
+  // no longer exist. Suspends now happen downstream: enterBookList() and
+  // the EPUB branch of workOpenBook().
 
   _work = Work::None;
   _workArmed = false;
@@ -199,6 +361,10 @@ void ReaderScene::onEnter() {
       prefs.getString(kPrefsBookKey, path, sizeof(path));
       const uint8_t fid = prefs.getUChar(kPrefsFontKey, static_cast<uint8_t>(_settings.fontId));
       if (fid < reader::kReaderFontCount) _settings.fontId = fid;
+      _wantLandscape = prefs.getUChar(kPrefsLandKey, 0) != 0;
+      _readKeyBar = prefs.getUChar(kPrefsKeysKey, 1) != 0;
+      _footerMode = prefs.getUChar(kPrefsFooterKey, 3);
+      if (_footerMode > 3) _footerMode = 3;
       prefs.end();
     }
   }
@@ -207,10 +373,36 @@ void ReaderScene::onEnter() {
     _prefetchAttemptedSpine = -1;
     _state = State::Opening;
     _work = Work::OpenBook;
-    markDirty();
+    if (_quietReopen) {
+      // Sync in place: the page is still on glass. Arm the open directly
+      // (render() normally arms it) and paint nothing until the book is
+      // back; then the page repaints as a differential refresh.
+      _quietReopen = false;
+      _workArmed = true;
+      clearDirty();  // switchTo marked us dirty; an "Opening book..." frame would replace the page
+    } else {
+      markDirty();
+    }
   } else {
+    _quietReopen = false;
     enterBookList();
   }
+}
+
+// F1: feed the live position stream after a committed page change. Lossy
+// by contract — reader.place (queued in onExit) stays the saved-place
+// truth. Quiet whenever the radio is suspended or the book is not a
+// package; the service applies the 1/sec brake and the 5-min heartbeat.
+void ReaderScene::streamPos() {
+  if (!_fbp || _radioSuspended || _bookPath.empty()) return;
+  if (_fbpPosPending || !_fbp->profileSelected()) return;  // no page shown yet: nothing true to say
+  if (!endsWithFbpCI(_bookPath.c_str())) return;
+  char key[64];
+  reader::FbpBook::canonicalKey(baseName(_bookPath.c_str()), key, sizeof(key));
+  uint32_t cid = 0;
+  _fbp->pageFirstCidPublic(_fbpPage, &cid);
+  COMPANION_BLE.queueReaderPos(key, _fbpPage, (uint16_t)_fbp->pageCount(), cid,
+                               reader::ReadingStats::sessionMinutes());
 }
 
 void ReaderScene::suspendRadioForBookWork() {
@@ -239,7 +431,18 @@ void ReaderScene::suspendRadioForBookWork() {
 }
 
 void ReaderScene::onExit() {
+  _fbForLoan = nullptr;  // no framebuffer borrow may survive this scene
+  // Capture the pagination BEFORE the book state is torn down below, for the
+  // place we hand the phone at the end (item 6 step 3).
+  const uint16_t exitPageCount = _fbp ? (uint16_t)_fbp->pageCount() : _lastPageCount;
+  const uint16_t exitPage = _fbpPage;
   reader::ReadingStats::sessionEnd();  // covers home/sleep exits mid-book
+  // Landscape belongs to the reader alone: hand the panel back in portrait
+  // so the launcher (and every other scene) lays out as designed.
+  if (_landscape && G_GFX) G_GFX->setOrientation(Gfx::Orient::Portrait);
+  _landscape = false;
+  _pendingOrient = -1;
+  _pendingRestorePortrait = false;
   // CrossPoint activity model: hold nothing while another scene is up.
   // Reopening from book.bin + progress.bin in onEnter is fast.
   _section.reset();
@@ -251,6 +454,29 @@ void ReaderScene::onExit() {
   _work = Work::None;
   _workArmed = false;
 
+  // Item 6 step 3: hand the phone where we got to. BLE was suspended while
+  // reading, so book-close is the first moment it can hear us. Queue the
+  // last-read place (already written to .pos on every turn); the pump sends
+  // it once the radio is back and the link is encrypted.
+  // Only a place the book actually showed. With the .pos still unread
+  // (a profile never selected: memory, a bad package) exitPage is 0 and
+  // exitPageCount is a stranger profile's; sending that told the iPhone
+  // "page 1 of 1461" and buried Andrew's page 68 (2026-09-06).
+  if (!_bookPath.empty() && endsWithFbpCI(_bookPath.c_str()) && !_fbpPosPending) {
+    char key[64];
+    reader::FbpBook::canonicalKey(baseName(_bookPath.c_str()), key, sizeof(key));
+    COMPANION_BLE.queueReaderPlace(key, exitPage, exitPageCount);
+  } else if (_fbpPosPending) {
+    Serial.println("[xphone-os] reader: exit before the first page; place not sent");
+  }
+  // Let the book go too (2026-09-07): its page buffer and dictionary held
+  // 11 KB through a sync started from inside a book, and the X3 froze at
+  // the phone's first request with 20 KB free. Every exit reopens the book
+  // from the saved place anyway (50 ms), and a sync now ends in a restart.
+  _fbp.reset();
+  _fbpPosPending = true;
+  COMPANION_BLE.clearReaderPos();  // F1: the stream and its heartbeat end with the book
+
   if (_radioSuspended) {
     _radioSuspended = false;
     COMPANION_BLE.resumeAfterReader();
@@ -261,15 +487,89 @@ void ReaderScene::onExit() {
 
 const char* const* ReaderScene::softKeys() const {
   static constexpr const char* kHidden[4] = {nullptr, nullptr, nullptr, nullptr};
-  // Slot 1 = the CONFIRM front button (SDK ladder order): font-size cycle.
-  static constexpr const char* kReading[4] = {L10N("BOOKS", "LIBRI"), L10N("SIZE", "TESTO"), L10N("PREV", "PREC"), L10N("NEXT", "SUCC")};
-  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), L10N("UP", "SU"), L10N("DOWN", "GIÙ")};
+  // 0.7 chrome v2: CONFIRM opens the full-page MENU. Labels always tell
+  // the truth about the button under them; BOOKS is the shelf whenever
+  // the label reads BOOKS.
+  // Slots 2 and 3 are the direction pair and are ARROW MARKS, not words —
+  // a shape says "one step back" faster than four letters can, and it says
+  // it in any language. Words are kept for the VERBS (BOOKS, MENU, SELECT,
+  // GO, DONE, BACK, READ, OPEN), which have no direction to show.
+  //
+  // The landscape tables are the same screens with the pair turned vertical
+  // and the up arrow on slot 3, the key that is physically the TOP one there
+  // (see the direction-key rule in Scene.h). Where that means the two keys
+  // trade jobs, dirSwap() below makes the input agree — the two are read from
+  // the same predicate so they cannot drift apart.
+  // (Portrait reading has no tab table anymore — reading chrome v3 draws
+  // its own bare labels; see renderReadingChrome.)
+  // Turning a page is a LEFT/RIGHT idea, not an up/down one (Andrew,
+  // 2026-08-17), so the arrows stay horizontal when the panel turns —
+  // only which key carries which action flips, so that "next" is the
+  // lower key your thumb rests on.
+  static constexpr const char* kReadingL[4] = {L10N("BOOKS", "LIBRI"), L10N("MENU", "MENU"), SoftKey::Right, SoftKey::Left};
+  static constexpr const char* kReadingRetL[4] = {L10N("RETURN", "TORNA"), L10N("MENU", "MENU"), SoftKey::Right, SoftKey::Left};
+  static constexpr const char* kMenuPage[4] = {L10N("BACK", "INDIETRO"), L10N("SELECT", "SCEGLI"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kMenuPageL[4] = {L10N("BACK", "INDIETRO"), L10N("OK", "OK"), SoftKey::Down, SoftKey::Up};
+  static constexpr const char* kSizeStrip[4] = {L10N("BACK", "INDIETRO"), L10N("DONE", "FATTO"), "A-", "A+"};
+  static constexpr const char* kChapters[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kChaptersL[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Down, SoftKey::Up};
+  static constexpr const char* kGoTo[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Left, SoftKey::Right};
+  static constexpr const char* kGoToL[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Right, SoftKey::Left};
+  static constexpr const char* kMarks[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kMarksL[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Down, SoftKey::Up};
+  static constexpr const char* kMarksEmpty[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, nullptr};
+  static constexpr const char* kNotes[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kNotesL[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Down, SoftKey::Up};
+  static constexpr const char* kStatsBook[4] = {L10N("BACK", "INDIETRO"), L10N("READ", "LEGGI"), nullptr, nullptr};
+  static constexpr const char* kStatsLife[4] = {L10N("BACK", "INDIETRO"), L10N("READ", "LEGGI"), nullptr, L10N("RESET", "AZZERA")};
+  static constexpr const char* kStatsErase[4] = {L10N("BACK", "INDIETRO"), L10N("ERASE", "CANCELLA"), nullptr, nullptr};
+  static constexpr const char* kList[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), SoftKey::Left, SoftKey::Right};
+  static constexpr const char* kListDone[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), SoftKey::Left, SoftKey::Right};
+  static constexpr const char* kListStats[4] = {L10N("BACK", "INDIETRO"), L10N("OPEN", "APRI"), SoftKey::Left, SoftKey::Right};
   static constexpr const char* kListEmpty[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, nullptr};
+  static constexpr const char* kLife[4] = {L10N("BACK", "INDIETRO"), nullptr, nullptr, L10N("RESET", "AZZERA")};
+  const bool land = _landscape;
+  static constexpr const char* kNotice[4] = {L10N("BACK", "INDIETRO"), L10N("READ", "LEGGI"), nullptr, nullptr};
+  static constexpr const char* kEndOffer[4] = {L10N("BACK", "INDIETRO"), L10N("READ", "LEGGI"), nullptr, nullptr};
+  static constexpr const char* kEndDone[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kHlPick[4] = {L10N("BACK", "INDIETRO"), L10N("KEEP", "SALVA"), SoftKey::Up, SoftKey::Down};
+  static constexpr const char* kWordPick[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Left, SoftKey::Right};
+  static constexpr const char* kWordPickL[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), SoftKey::Right, SoftKey::Left};
+  static constexpr const char* kWordSheet[4] = {L10N("BACK", "INDIETRO"), L10N("GO", "VAI"), nullptr, nullptr};
+#ifdef FLOWE_PREPARED_GUIDE
+  static constexpr const char* kGuideSheet[4] = {"BACK", "READ", nullptr, nullptr};
+  if (_state == State::Reading && _wcMode && _wcSheet && _wcGuide) return kGuideSheet;
+#endif
   switch (_state) {
     case State::Reading:
-      return kReading;
+      if (_hlMode) return kHlPick;
+      if (_wcMode) return _wcSheet ? kWordSheet : (land ? kWordPickL : kWordPick);
+      if (_endOffer) return _offerFromPhone ? kEndOffer : kEndDone;
+      if (_coverageNotice) return kNotice;
+      switch (_menu) {
+        case MenuView::Page:      return land ? kMenuPageL : kMenuPage;
+        case MenuView::SizeStrip: return kSizeStrip;
+        case MenuView::Chapters:  return land ? kChaptersL : kChapters;
+        case MenuView::GoTo:      return land ? kGoToL : kGoTo;
+        case MenuView::Bookmarks:
+          return _markCount == 0 ? kMarksEmpty : (land ? kMarksL : kMarks);
+        case MenuView::Notes:     return land ? kNotesL : kNotes;
+        case MenuView::StatsBook: return kStatsBook;
+        case MenuView::StatsLife: return _statsResetArm ? kStatsErase : kStatsLife;
+        case MenuView::None:      break;
+      }
+      // Reading chrome v3: portrait reading draws its own bare labels (see
+      // renderReadingChrome) — no tabs from the SceneManager. Landscape
+      // keeps the tab column, and the Hidden setting (flowe-os#41) blanks
+      // it there too; the buttons keep working either way.
+      if (!land) return kHidden;
+      if (!_readKeyBar) return kHidden;
+      return _noteReturn >= 0 ? kReadingRetL : kReadingL;
     case State::BookList:
-      return _bookCount > 0 ? kList : kListEmpty;
+      if (_lifeOpen) return _statsResetArm ? kStatsErase : kLife;
+      if (_sel < 0) return kListStats;
+      if (_doneView) return kListDone;  // #26: BACK returns to the shelf
+      return _totalBooks > 0 ? kList : kListEmpty;
     case State::Error:
       return kListEmpty;
     case State::Opening:
@@ -326,22 +626,62 @@ void ReaderScene::failWith(const char* msg) {
   _errorMsg = msg;
   _state = State::Error;
   _work = Work::None;
-  _turnAwaitsIndex = false;  // the chapter never reached glass: don't count that turn later
   markDirty();
 }
 
 void ReaderScene::workOpenBook() {
-  suspendRadioForBookWork();  // opening always needs the dict + a quiet heap
-  // Leaving the grid: hand the ~58KB cover-decoder scratch back to the heap so
-  // chapter indexing (32KB inflate + expat + line breaking) has full headroom.
+#ifdef FLOWE_PREPARED_GUIDE
+  // A cached byte identity and word boxes belong to one open book only.
+  _guideBound = _wcGuide = _wcMode = _wcSheet = false;
+#endif
+  // Leaving the grid: hand the ~58KB cover-decoder scratch back to the heap
+  // before anything else claims it.
   reader::CoverThumb::releaseScratch();
+  _coverageChecked = false;
+  _coverageNotice = false;
+  _endOffer = false;  // a stale offer must not survive into the next book
+  if (endsWithFbpCI(_bookPath.c_str())) {
+    // Reading keeps the radio (2026-08-18) — unless the R4 setting says
+    // otherwise. Decided HERE, once per open, never mid-read. Battery is
+    // read fresh for the Auto rule; an unknown percentage fails open.
+    int pct = -1;
+    {
+      static BatteryMonitor battery;
+      const BatteryMonitor::Status batt = battery.readStatus();
+      if (batt.supported && batt.percentageKnown) pct = batt.percentage;
+    }
+    if (RadioPolicy::radioAllowed(pct)) {
+      // Bring the stack up NOW, into the cleanest heap — BEFORE the book's
+      // state exists, never beside it (BLE init beside ~60 KB of resident
+      // book state hard-hung an X4, see the M4.2 note in main.cpp).
+      // resumeAfterReader() no-ops when the radio is already up; this also
+      // revives the boot-deferred radios when a restore lands in a book.
+      _radioSuspended = false;
+      COMPANION_BLE.resumeAfterReader();
+      // P1.1: free the connected-era strings BEFORE the book claims its
+      // page buffer, so they cannot sit in the middle of the reading heap.
+      // The EPUB path has always done this via suspendForReader(); the FBP
+      // path never did (efficiency audit 2026-09-02).
+      COMPANION_BLE.releaseReaderTransients(/*radioUp=*/true);
+    } else {
+      // Policy says quiet: same suspend the EPUB path uses. The radio
+      // returns on book close exactly as it does for EPUBs today.
+      Serial.printf("[xphone-os] reader: radio off for this book (policy=%u batt=%d%%)\n",
+                    static_cast<unsigned>(RadioPolicy::get()), pct);
+      suspendRadioForBookWork();
+    }
+    workOpenFbp();
+    return;
+  }
+  suspendRadioForBookWork();  // EPUBs still need the quiet heap: expat + indexing
   const uint32_t t0 = millis();
   auto* e = new (std::nothrow) reader::Epub(_bookPath, reader::kReaderCacheRoot);
   if (!e) {
-    failWith(L10N("Out of memory opening book", "Memoria esaurita aprendo il libro"));
+    failWith("Out of memory opening book");
     return;
   }
   _epub.reset(e);
+  loadBookmarks();
 
   // load() reads the cached book.bin (fast) or builds it on first open (zip
   // scan + content.opf parse — the slow path this Opening frame covers).
@@ -352,14 +692,14 @@ void ReaderScene::workOpenBook() {
       prefs.remove(kPrefsBookKey);  // don't loop into the same failure on re-entry
       prefs.end();
     }
-    failWith(L10N("Couldn't open this book", "Impossibile aprire questo libro"));
+    failWith("Couldn't open this book");
     return;
   }
 
   auto* m = new (std::nothrow) reader::TextMeasure(reader::readerFontFamily(_settings.fontId));
   if (!m) {
     _epub.reset();
-    failWith(L10N("Out of memory opening book", "Memoria esaurita aprendo il libro"));
+    failWith("Out of memory opening book");
     return;
   }
   _measure.reset(m);
@@ -370,9 +710,1527 @@ void ReaderScene::workOpenBook() {
   ensureSectionOrIndex();
 }
 
+void ReaderScene::workOpenFbp() {
+  const uint32_t t0 = millis();
+  auto* fb = new (std::nothrow) reader::FbpBook();
+  if (!fb || !fb->open(_bookPath.c_str())) {
+    delete fb;
+    failWith("Couldn't open this book");
+    return;
+  }
+  _fbp.reset(fb);
+  // The saved position can be numbered in another build's pagination; it can
+  // only be rescaled once the profile (and so the page count) is chosen, and
+  // that happens at first render. Defer the read until then.
+  _fbpPage = 0;
+  _fbpPosPending = true;
+  reader::ReadingStats::sessionStart(_bookPath);
+  loadBookmarks();
+  // Restore the reader's orientation. render() applies it (it holds the Gfx);
+  // a package without landscape profiles simply opens portrait and the
+  // preference is left alone for the next book that can honour it.
+  if (_wantLandscape) {
+    _pendingOrient = 1;
+    _pendingOrientPersist = false;
+  }
+  Serial.printf("[xphone-os] reader: opened fbp '%s' (%lu ms) heap=%u\n", _fbp->title(),
+                static_cast<unsigned long>(millis() - t0), ESP.getFreeHeap());
+  _state = State::Reading;
+  markDirty();
+}
+
+void ReaderScene::fbpTurn(const bool forward) {
+  if (!_fbp) return;
+  const uint16_t last = _fbp->pageCount() ? (uint16_t)(_fbp->pageCount() - 1) : 0;
+  uint16_t next = _fbpPage;
+  if (forward && _fbpPage < last) next++;
+  else if (!forward && _fbpPage > 0) next--;
+  if (next == _fbpPage) {
+    // A3: turning "past" the last page = the book is finished. Offer the
+    // oldest unread package on the card instead of doing nothing.
+    if (forward && last > 0) offerNextUnread();
+    return;
+  }
+  if (forward) noteTurnPace();
+  _fbpPage = next;
+  if (_bookDone) {  // C4: reading on un-finishes the book
+    char side[192];
+    snprintf(side, sizeof(side), "%s.done", _bookPath.c_str());
+    SdMan.remove(side);
+    _bookDone = false;
+    Serial.printf("[xphone-os] reader: reading again '%s'\n", baseName(_bookPath.c_str()));
+  }
+  reader::ReadingStats::pageTurn();
+  if (_fbp) _lastPageCount = (uint16_t)_fbp->pageCount();
+  reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _lastPageCount);
+  streamPos();
+  markDirty();
+}
+
+// --- A3 finished-book offer ----------------------------------------------------
+
+namespace {
+// Scan state for findOldestUnread: the best candidate so far, keyed by FAT
+// modify time ((date<<16)|time — the encoding is monotonic as an integer).
+// Ties keep the FIRST match in directory order, so cards whose files all
+// carry the FAT default timestamp still pick deterministically.
+struct OldestUnreadScan {
+  const char* skipPath = nullptr;  // the book being read — never re-offer it
+  char bestPath[160] = {0};
+  char bestTitle[64] = {0};
+  char bestAuthor[48] = {0};
+  uint32_t bestKey = 0xFFFFFFFFu;
+  bool found = false;
+  // Scratch for the candidate under test, here instead of the recursing
+  // scan frames: the loop task's stack head-room is under 2 KB.
+  char title[64];
+  char author[48];
+  char side[176];
+};
+
+// Same walk rules as scanDir (root + one subfolder level, dot-files and
+// over-long names skipped), but only .fbp packages with NO .pos sidecar
+// qualify — a package the reader never wrote progress for is unread.
+// readMeta gates the candidate, so a corrupt package can never be offered;
+// it runs only when a file beats the current best, which keeps the header
+// reads to a handful per scan.
+void scanOldestUnread(OldestUnreadScan& ctx, const char* dir, const int depth) {
+  FsFile d = SdMan.open(dir, O_RDONLY);
+  if (!d || !d.isDir()) return;
+  const bool isRoot = (dir[0] == '/' && dir[1] == '\0');
+  FsFile f;
+  while (f.openNext(&d, O_RDONLY)) {
+    char name[128];
+    const int len = f.getName(name, sizeof(name));
+    if (len <= 0 || name[0] == '.' || len >= static_cast<int>(sizeof(name)) - 1) {
+      f.close();
+      continue;
+    }
+    if (f.isDir()) {
+      if (depth == 0) {
+        char sub[160];
+        const int n = snprintf(sub, sizeof(sub), "%s/%s", dir, name);
+        f.close();  // SdFat file handles are scarce: close before recursing
+        if (n > 0 && n < static_cast<int>(sizeof(sub))) scanOldestUnread(ctx, sub, depth + 1);
+      } else {
+        f.close();
+      }
+      continue;
+    }
+    uint16_t fdate = 0, ftime = 0;
+    f.getModifyDateTime(&fdate, &ftime);
+    f.close();
+    if (!endsWithFbpCI(name)) continue;
+    char full[160];
+    const int n = snprintf(full, sizeof(full), "%s/%s", isRoot ? "" : dir, name);
+    if (n <= 0 || n >= static_cast<int>(sizeof(full))) continue;
+    if (ctx.skipPath && strcmp(full, ctx.skipPath) == 0) continue;
+    const uint32_t key = (static_cast<uint32_t>(fdate) << 16) | ftime;
+    if (key >= ctx.bestKey && ctx.found) continue;
+    snprintf(ctx.side, sizeof(ctx.side), "%s.pos", full);
+    if (SdMan.exists(ctx.side)) continue;  // has progress: not unread
+    // Read into scratch, not the best-candidate buffers: a corrupt package
+    // can fail readMeta AFTER partially writing them, and the standing
+    // best candidate's title must survive that.
+    if (!reader::FbpBook::readMeta(full, ctx.title, sizeof(ctx.title), ctx.author,
+                                   sizeof(ctx.author))) {
+      continue;  // unreadable package: never offer it
+    }
+    memcpy(ctx.bestPath, full, static_cast<size_t>(n) + 1);
+    memcpy(ctx.bestTitle, ctx.title, sizeof(ctx.title));
+    memcpy(ctx.bestAuthor, ctx.author, sizeof(ctx.author));
+    ctx.bestKey = key;
+    ctx.found = true;
+  }
+}
+}  // namespace
+
+bool ReaderScene::findOldestUnread(char* pathOut, size_t pathCap) {
+  if (!SdMan.ready() && !SdMan.begin()) return false;
+  OldestUnreadScan ctx;
+  ctx.skipPath = _bookPath.c_str();
+  scanOldestUnread(ctx, "/books", 0);
+  if (!ctx.found) return false;
+  snprintf(pathOut, pathCap, "%s", ctx.bestPath);
+  snprintf(_endOfferTitle, sizeof(_endOfferTitle), "%s", ctx.bestTitle);
+  snprintf(_endOfferAuthor, sizeof(_endOfferAuthor), "%s", ctx.bestAuthor);
+  return true;
+}
+
+void ReaderScene::offerNextUnread() {
+  if (_endOffer) return;
+  char path[160];
+  _endOfferPath[0] = 0;
+  _endOfferTitle[0] = 0;
+  _endOfferAuthor[0] = 0;
+  if (findOldestUnread(path, sizeof(path))) {
+    snprintf(_endOfferPath, sizeof(_endOfferPath), "%s", path);
+    Serial.printf("[xphone-os] reader: finished '%s'; offering '%s'\n", baseName(_bookPath.c_str()),
+                  baseName(_endOfferPath));
+  } else {
+    // Fires once per NEXT press on the last page; the line is the bench's
+    // only way to tell "no candidate" from "trigger never ran".
+    Serial.println("[xphone-os] reader: finished; no unread package to offer");
+  }
+  // C4: the screen opens either way. "Mark finished" is the first row;
+  // the next book, when there is one, is the second.
+  _offerFromPhone = false;  // this one is the device's own idea (A3)
+  _offerGotoCid = 0;
+  _endSel = 0;
+  _endOffer = true;
+  markDirty();
+}
+
+void ReaderScene::markFinished() {
+  char side[192];
+  snprintf(side, sizeof(side), "%s.done", _bookPath.c_str());
+  FsFile f = SdMan.open(side, O_WRONLY | O_CREAT | O_TRUNC);
+  if (f) {
+    const uint8_t one = 1;
+    f.write(&one, 1);
+    f.close();
+  }
+  if (_fbp) reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp->pageCount());
+  Serial.printf("[xphone-os] reader: marked finished '%s'\n", baseName(_bookPath.c_str()));
+  _endOffer = false;
+  _bookDone = true;
+  enterBookList();  // ends the session and repaints the shelf
+}
+
+void ReaderScene::openEndOfferBook() {
+  // Same full-reopen mechanics as openSelectedBook, with a path instead of a
+  // shelf selection. sessionStart in workOpenFbp closes the old session.
+  // The OLD book frees FIRST — a direct book-to-book switch otherwise holds
+  // two page buffers + two glyph caches at once and the second open dies
+  // with "no room for a page buffer" (caught by X1's cross-book jump with
+  // two big books, 2026-09-02).
+  _section.reset();
+  _epub.reset();
+  _measure.reset();
+  _fbp.reset();
+  _renderer.releaseCaches();
+  _bookPath = _endOfferPath;
+  {
+    Preferences prefs;
+    if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+      prefs.putString(kPrefsBookKey, _bookPath.c_str());
+      prefs.end();
+    }
+  }
+  _spine = 0;
+  _nextPage = 0;
+  _hasPendingRatio = false;
+  _prefetchAttemptedSpine = -1;
+  _pageLoadRetries = 0;
+  _state = State::Opening;
+  _work = Work::OpenBook;
+  _workArmed = false;
+  markDirty();
+}
+
+// X1 reader.goto: the phone asks for a paragraph. Scene rules (v1, in the
+// proposal): the SAME open book jumps live; any other target shows the
+// A3-style confirm first — the phone must never yank the page out from
+// under a reader. The reply the phone waits for is the reader.pos that
+// streamPos() sends after the jump.
+void ReaderScene::acceptGoto(const char* key, uint32_t cid) {
+  if (_state == State::Reading && _fbp && !_bookPath.empty()) {
+    char openKey[64];
+    reader::FbpBook::canonicalKey(baseName(_bookPath.c_str()), openKey, sizeof(openKey));
+    if (strcmp(openKey, key) == 0) {
+      const uint16_t page = _fbp->pageForContentId(cid);
+      if (page != _fbpPage) {
+#ifdef FLOWE_PREPARED_GUIDE
+        _wcGuide = _wcMode = _wcSheet = false;
+#endif
+        _fbpPage = page;
+        reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp->pageCount());
+      }
+      streamPos();  // the confirm the phone listens for, jump or no-op alike
+      _menu = MenuView::None;
+      _endOffer = false;
+      markDirty();
+      Serial.printf("[xphone-os] goto: live jump to ~%lu (page %u)\n",
+                    static_cast<unsigned long>(cid), static_cast<unsigned>(_fbpPage));
+      return;
+    }
+  }
+  // Different or closed book: find it, then ask on the glass.
+  char path[160];
+  if (!reader::FbpBook::findByKey(key, path, sizeof(path))) {
+    Serial.printf("[xphone-os] goto: no book for key '%s'\n", key);
+    return;
+  }
+  if (!reader::FbpBook::readMeta(path, _endOfferTitle, sizeof(_endOfferTitle), _endOfferAuthor,
+                                 sizeof(_endOfferAuthor))) {
+    Serial.printf("[xphone-os] goto: unreadable package '%s'\n", path);
+    return;
+  }
+  snprintf(_endOfferPath, sizeof(_endOfferPath), "%s", path);
+  _offerGotoCid = cid;
+  _offerFromPhone = true;
+  _endOffer = true;
+  _menu = MenuView::None;
+  markDirty();
+  Serial.printf("[xphone-os] goto: confirm on glass for '%s' ~%lu\n", baseName(path),
+                static_cast<unsigned long>(cid));
+}
+
+// --- R1 highlight pick mode ----------------------------------------------------
+
+// Enter from the menu row. Only v7 packages qualify (the line table is
+// what makes a paragraph selectable); the row itself explains otherwise.
+void ReaderScene::enterHlMode() {
+  if (!_fbp || _fbp->lineCidCount() == 0) return;
+  _hlMode = true;
+  _hlCid = _fbp->lineCid(0);  // the paragraph under the top of the page
+  _hlPendingEdge = 0;
+  _menu = MenuView::None;
+  markDirty();
+}
+
+void ReaderScene::handleHlInput(Input& in) {
+  if (in.wasPressed(Btn::Back)) {
+    _hlMode = false;
+    markDirty();
+    return;
+  }
+  if (in.wasPressed(Btn::Confirm)) {
+    // Toggle, tell the phone, flash the verdict, stay in the mode so a
+    // second highlight is one move away.
+    const int r = reader::Highlights::toggle(_bookPath.c_str(), _hlCid, CLOCK_STORE.day);
+    if (r != 0) {
+      snprintf(_hlFlashText, sizeof(_hlFlashText), r > 0 ? "Kept" : "Removed");
+      _hlFlashUntil = millis() + 1000;
+      char key[64];
+      reader::FbpBook::canonicalKey(baseName(_bookPath.c_str()), key, sizeof(key));
+      COMPANION_BLE.notifyReaderHl(key, _hlCid, CLOCK_STORE.day, r < 0);
+    } else {
+      snprintf(_hlFlashText, sizeof(_hlFlashText), "Card write failed");
+      _hlFlashUntil = millis() + 1500;
+    }
+    markDirty();
+    return;
+  }
+  const bool up = in.wasPressed(Btn::Up) || backKey(in);
+  const bool down = in.wasPressed(Btn::Down) || fwdKey(in);
+  if (!up && !down) {
+    // Flash expiry repaint (the strip must not linger).
+    if (_hlFlashUntil && millis() >= _hlFlashUntil) {
+      _hlFlashUntil = 0;
+      markDirty();
+    }
+    return;
+  }
+  // Move by paragraph. Off the page's edge, turn the page and select the
+  // near end of the new one (applied after that page renders).
+  const uint8_t n = _fbp ? _fbp->lineCidCount() : 0;
+  if (n == 0) return;
+  if (down) {
+    uint32_t next = 0;
+    for (uint8_t i = 0; i < n; i++)
+      if (_fbp->lineCid(i) > _hlCid) {
+        next = _fbp->lineCid(i);
+        break;
+      }
+    if (next) {
+      _hlCid = next;
+    } else {
+      _hlPendingEdge = +1;
+      fbpTurn(true);
+    }
+  } else {
+    uint32_t prev = 0;
+    for (uint8_t i = 0; i < n; i++)
+      if (_fbp->lineCid(i) < _hlCid) prev = _fbp->lineCid(i);
+    if (prev) {
+      _hlCid = prev;
+    } else {
+      _hlPendingEdge = -1;
+      fbpTurn(false);
+    }
+  }
+  markDirty();
+}
+
+// --- Reader MENU v2 (full page + live strips) ---------------------------------
+
+// Menu rows. Go-to is FBP-only (an epub's page numbers are per-chapter
+// and unstable), so epub books show one row fewer and the rows after it
+// shift down — menuRow() maps a cursor index to the row identity.
+enum MenuRow : uint8_t {
+  kMenuRowSize = 0,
+  kMenuRowChapters,
+  kMenuRowNotes,
+  kMenuRowGoTo,
+  kMenuRowBookmark,
+  kMenuRowBookmarks,
+  kMenuRowOrientation,
+  kMenuRowHighlight,
+  kMenuRowLookUp,
+  kMenuRowRadio,
+  kMenuRowKeyLabels,
+  kMenuRowFooter,
+  kMenuRowStats,
+  kMenuRowCount,
+};
+
+// The visible rows, in order, for the book that is open.
+//
+// Orientation used to appear only when the package carried landscape
+// pages. From 2026-08-20 the apps stop building those by default, because
+// a landscape edition is a second full set of pre-composed pages and
+// nearly doubles a book. Hiding the row would then quietly delete the
+// feature for almost every book, so the row stays and its value column
+// says why it cannot be used. An offer beats an absence.
+static int menuRows(bool isFbp, bool landscapeReady, bool notesHere, MenuRow* out) {
+  (void)landscapeReady;
+  int n = 0;
+  out[n++] = kMenuRowSize;
+  out[n++] = kMenuRowChapters;
+  // Only when this page carries a mark (CrossPoint's rule): a row that
+  // says "none" on nine pages in ten is noise, not an offer.
+  if (isFbp && notesHere) out[n++] = kMenuRowNotes;
+  if (isFbp) out[n++] = kMenuRowGoTo;
+  out[n++] = kMenuRowBookmark;
+  out[n++] = kMenuRowBookmarks;
+  if (isFbp) out[n++] = kMenuRowOrientation;
+  if (isFbp) out[n++] = kMenuRowHighlight;
+  if (isFbp) out[n++] = kMenuRowLookUp;
+  // R4: packages only — EPUBs must suspend the radio for heap whatever the
+  // setting says, and a row that lies about its power is worse than no row.
+  if (isFbp) out[n++] = kMenuRowRadio;
+  out[n++] = kMenuRowKeyLabels;
+  out[n++] = kMenuRowFooter;
+  out[n++] = kMenuRowStats;
+  return n;
+}
+
+uint8_t ReaderScene::longPressSlots() const {
+#ifdef FLOWE_PREPARED_GUIDE
+  if (_state == State::Reading && _wcMode && !_wcSheet) return 0x02;
+#endif
+  // The only long press in the reader a person could not guess: hold GO on a
+  // bookmark to delete it. Everything else the labels already say.
+  if (_state == State::Reading && _menu == MenuView::Bookmarks && _markCount > 0) return 0x02;
+  return 0;
+}
+
+// Which physical soft key currently means "one step back" / "one step on".
+//
+// Portrait: slot 2 is the left key and slot 3 the right one, so back = Left.
+// Landscape: the tab column runs upward from slot 0, so slot 3 is the TOP key
+// — and the up arrow has to sit on it or the mark points away from the button
+// under your thumb. Everything therefore trades places EXCEPT the text-size
+// pair, whose portrait order (smaller, bigger) already puts "bigger" on slot
+// 3. softKeys() reads the same predicate, so label and action cannot drift.
+bool ReaderScene::dirSwap() const {
+  return _landscape && !(_state == State::Reading && _menu == MenuView::SizeStrip);
+}
+bool ReaderScene::backKey(Input& in) const {
+  return in.wasPressed(dirSwap() ? Btn::Right : Btn::Left);
+}
+bool ReaderScene::fwdKey(Input& in) const {
+  return in.wasPressed(dirSwap() ? Btn::Left : Btn::Right);
+}
+
+void ReaderScene::handleMenuInput(Input& in) {
+  MenuRow rowIds[kMenuRowCount];
+  const int rows = menuRows(_fbp != nullptr, _landscapeReady, notesHere(nullptr) > 0, rowIds);
+  switch (_menu) {
+    case MenuView::Page:
+      if (in.wasPressed(Btn::Back)) {
+        // Labeled BACK: up one level from the menu is the book itself.
+        _menu = MenuView::None;
+        _orientNote = false;
+        markDirty();
+      } else if (in.wasPressed(Btn::Up) || backKey(in)) {
+        _menuSel = (_menuSel + rows - 1) % rows;
+        _orientNote = false;  // the note belongs to one row, one press
+        markDirty();
+      } else if (in.wasPressed(Btn::Down) || fwdKey(in)) {
+        _menuSel = (_menuSel + 1) % rows;
+        _orientNote = false;
+        markDirty();
+      } else if (in.wasPressed(Btn::Confirm)) {
+        menuSelect();
+      }
+      return;
+
+    case MenuView::SizeStrip:
+      if (in.wasPressed(Btn::Back)) {          // labeled MENU: back up a level
+        _menu = MenuView::Page;
+        markDirty();
+      } else if (in.wasPressed(Btn::Confirm)) {  // DONE: back to the menu
+        _menu = MenuView::Page;
+        markDirty();
+      } else if (in.wasPressed(Btn::Up) || fwdKey(in)) {
+        sizeStep(+1);
+      } else if (in.wasPressed(Btn::Down) || backKey(in)) {
+        sizeStep(-1);
+      }
+      return;
+
+    case MenuView::Chapters: {
+      int count = 0, cur = 0;
+      chapterCountAndSel(&count, &cur);
+      if (in.wasPressed(Btn::Back)) {
+        _tocRepeatFrom = Btn::COUNT;
+        _menu = MenuView::Page;
+        markDirty();
+        return;
+      }
+      if (in.wasPressed(Btn::Confirm)) {
+        _tocRepeatFrom = Btn::COUNT;
+        chapterJump(_tocSel);
+        return;
+      }
+      if (count <= 0) return;
+
+      // Long lists were painful: one tap = one move = one ~750 ms full-panel
+      // refresh, and holding the key did nothing (beta report #43).
+      //
+      // Tap = one step. HOLD = jump five, repainting each jump, so a
+      // 40-chapter book is a couple of seconds away and you can still see
+      // where you are.
+      //
+      // The hold is detected from Input::isPressed()'s debounced LEVEL, not
+      // from a tap edge: a tap only fires on RELEASE, so arming the repeat
+      // from one meant a genuine press-and-hold never repeated at all. (That
+      // was the first version of this fix, and it shipped doing nothing —
+      // caught by injecting a real hold from the dev console.)
+      const Btn upBtn = dirSwap() ? Btn::Right : Btn::Left;
+      const Btn downBtn = dirSwap() ? Btn::Left : Btn::Right;
+      const uint32_t nowMs = millis();
+
+      // Single steps wrap (a 3-chapter book cycles naturally); five-at-a-time
+      // jumps CLAMP, because leaping from chapter 2 to the end of the book is
+      // disorienting rather than helpful.
+      auto step = [&](int delta) {
+        if (delta == 1 || delta == -1) {
+          _tocSel = (_tocSel + count + delta) % count;
+          return;
+        }
+        int next = _tocSel + delta;
+        if (next < 0) next = 0;
+        if (next > count - 1) next = count - 1;
+        _tocSel = next;
+      };
+
+      const bool upHeld = in.isPressed(Btn::Up) || in.isPressed(upBtn);
+      const bool downHeld = in.isPressed(Btn::Down) || in.isPressed(downBtn);
+
+      if (!upHeld && !downHeld) {
+        _tocRepeatFrom = Btn::COUNT;  // nothing held: disarm
+      } else {
+        const Btn dir = upHeld ? Btn::Up : Btn::Down;
+        if (_tocRepeatFrom != dir) {  // press edge (or direction changed)
+          _tocRepeatFrom = dir;
+          _tocRepeatNextMs = nowMs + kTocRepeatDelayMs;
+        } else if (static_cast<int32_t>(nowMs - _tocRepeatNextMs) >= 0) {
+          step(upHeld ? -kTocJumpStride : kTocJumpStride);
+          _tocRepeatNextMs = nowMs + kTocRepeatRateMs;
+          markDirty();  // every jump paints: five rows is a visible move
+        }
+      }
+
+      // Discrete taps: one step, painted at once. A tap arrives on release,
+      // and only when the press was short enough that no jump ran.
+      if (in.wasPressed(Btn::Up) || in.wasPressed(upBtn)) {
+        step(-1);
+        markDirty();
+      } else if (in.wasPressed(Btn::Down) || in.wasPressed(downBtn)) {
+        step(+1);
+        markDirty();
+      }
+      return;
+    }
+
+    case MenuView::GoTo: {
+      if (!_fbp) { _menu = MenuView::Page; return; }
+      const int last = _fbp->pageCount() ? (int)_fbp->pageCount() - 1 : 0;
+      int delta = 0;
+      if (fwdKey(in)) delta = +1;
+      else if (backKey(in)) delta = -1;
+      else if (in.wasPressed(Btn::Down)) delta = +10;   // top pair: coarse
+      else if (in.wasPressed(Btn::Up)) delta = -10;
+      if (delta != 0) {
+        int p = (int)_fbpPage + delta;
+        if (p < 0) p = 0;
+        if (p > last) p = last;
+        if (p != (int)_fbpPage) {
+          _fbpPage = (uint16_t)p;  // live preview: the page IS the answer
+          markDirty();
+        }
+        return;
+      }
+      if (in.wasPressed(Btn::Confirm)) {  // GO: stay here and read
+        if (_fbpPage != (uint16_t)_gotoPage) _noteReturn = -1;
+        reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp ? _fbp->pageCount() : 0);
+    streamPos();
+        _menu = MenuView::None;
+        markDirty();
+      } else if (in.wasPressed(Btn::Back)) {  // labeled MENU: cancel, restore
+        _fbpPage = (uint16_t)_gotoPage;
+        _menu = MenuView::Page;
+        markDirty();
+      }
+      return;
+    }
+
+    case MenuView::Notes: {
+      const int n = notesHere(nullptr);
+      if (in.wasPressed(Btn::Back)) {
+        _menu = MenuView::Page;
+        markDirty();
+      } else if (in.wasPressed(Btn::Confirm)) {
+        if (n > 0) noteJump(_noteSel);
+      } else if (n > 0 && (in.wasPressed(Btn::Up) || backKey(in))) {
+        _noteSel = (_noteSel + n - 1) % n;
+        markDirty();
+      } else if (n > 0 && (in.wasPressed(Btn::Down) || fwdKey(in))) {
+        _noteSel = (_noteSel + 1) % n;
+        markDirty();
+      }
+      return;
+    }
+
+    case MenuView::Bookmarks:
+      if (in.wasPressed(Btn::Back)) {
+        _menu = MenuView::Page;
+        markDirty();
+      } else if (in.wasPressed(Btn::Confirm)) {
+        if (_markCount > 0) jumpToBookmark(_markSel);
+      } else if (in.wasLongPressed(Btn::Confirm)) {
+        // Long-press GO deletes the mark under the cursor.
+        if (_markCount > 0) {
+          const int n = reader::Bookmarks::remove(_bookPath.c_str(), _markSel);
+          if (n >= 0) {
+            loadBookmarks();
+            if (_markSel >= _markCount) _markSel = _markCount > 0 ? _markCount - 1 : 0;
+            markDirty();
+          }
+        }
+      } else if (_markCount > 0 && (in.wasPressed(Btn::Up) || backKey(in))) {
+        _markSel = (_markSel + _markCount - 1) % _markCount;
+        markDirty();
+      } else if (_markCount > 0 && (in.wasPressed(Btn::Down) || fwdKey(in))) {
+        _markSel = (_markSel + 1) % _markCount;
+        markDirty();
+      }
+      return;
+
+    case MenuView::StatsBook:
+    case MenuView::StatsLife:
+      // READING LIFE only: RESET (the slot-3 key) arms the erase confirm;
+      // once armed, ERASE is Confirm and BACK stands down (flowe-os#44).
+      if (_menu == MenuView::StatsLife && _statsResetArm) {
+        if (in.wasPressed(Btn::Confirm)) {
+          reader::ReadingStats::resetAll();
+          _statsResetArm = false;
+          markDirty();  // the page now honestly says "Nothing to show yet"
+        } else if (in.wasPressed(Btn::Back)) {
+          _statsResetArm = false;
+          markDirty();
+        }
+        return;
+      }
+      if (_menu == MenuView::StatsLife && in.wasPressed(Btn::Right)) {
+        _statsResetArm = true;
+        markDirty();
+        return;
+      }
+      if (in.wasPressed(Btn::Confirm)) {
+        _menu = MenuView::None;  // READ
+        markDirty();
+      } else if (in.wasPressed(Btn::Back)) {
+        _menu = MenuView::Page;
+        markDirty();
+      }
+      return;
+
+    case MenuView::None:
+      return;
+  }
+}
+
+void ReaderScene::menuSelect() {
+  MenuRow rowIds[kMenuRowCount];
+  const int rows = menuRows(_fbp != nullptr, _landscapeReady, notesHere(nullptr) > 0, rowIds);
+  if (_menuSel < 0 || _menuSel >= rows) return;
+  switch (rowIds[_menuSel]) {
+    case kMenuRowSize:
+      _menu = MenuView::SizeStrip;
+      markDirty();
+      return;
+    case kMenuRowChapters: {
+      int count = 0, cur = 0;
+      chapterCountAndSel(&count, &cur);
+      if (count <= 0) return;  // no TOC: the row is inert, not broken
+      _tocSel = cur;
+      _menu = MenuView::Chapters;
+      markDirty();
+      return;
+    }
+    case kMenuRowNotes: {
+      const int n = notesHere(nullptr);
+      if (n <= 0) return;
+      if (n == 1) {  // one mark: no list to choose from
+        noteJump(0);
+        return;
+      }
+      _noteSel = 0;
+      _menu = MenuView::Notes;
+      markDirty();
+      return;
+    }
+    case kMenuRowGoTo:
+      if (!_fbp) return;
+      _gotoPage = _fbpPage;  // cancel restores this
+      _menu = MenuView::GoTo;
+      markDirty();
+      return;
+    case kMenuRowBookmark:
+      toggleBookmarkHere();
+      markDirty();  // the row's own label reports the result
+      return;
+    case kMenuRowBookmarks:
+      // Opens even with nothing in it. The empty state names the row that
+      // makes one; a SELECT that visibly does nothing just looks broken.
+      _markSel = 0;
+      _menu = MenuView::Bookmarks;
+      markDirty();
+      return;
+    case kMenuRowOrientation:
+      if (!_landscapeReady) {
+        // This book has no rotated pages. Say where they come from
+        // instead of ignoring the press.
+        _orientNote = true;
+        markDirty();
+        return;
+      }
+      // Applied in render(), which has the Gfx. Persisted: this is the
+      // reader's global orientation from now on.
+      _pendingOrient = _landscape ? 0 : 1;
+      _pendingOrientPersist = true;
+      markDirty();
+      return;
+    case kMenuRowHighlight:
+      if (!_fbp || _fbp->lineCidCount() == 0) {
+        _hlNote = true;  // pre-v7 book: the value column explains (below)
+        markDirty();
+        return;
+      }
+      enterHlMode();
+      return;
+    case kMenuRowLookUp:
+      if (!_fbp || !_fbp->hasWordBoxes()) {
+        _wcNote = true;  // pre-v8 book: the value column explains
+        markDirty();
+        return;
+      }
+      enterWordMode();
+      return;
+    case kMenuRowRadio:
+      // Cycle Auto -> Always -> Never. Applies at the NEXT book open, so a
+      // press here never drops the radio under the page being read.
+      RadioPolicy::set(RadioPolicy::cycled());
+      markDirty();  // the row's value column reports the new state
+      return;
+    case kMenuRowKeyLabels: {
+      _readKeyBar = !_readKeyBar;
+      Preferences prefs;
+      if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+        prefs.putUChar(kPrefsKeysKey, _readKeyBar ? 1 : 0);
+        prefs.end();
+      }
+      markDirty();  // the row's value column reports the result
+      return;
+    }
+    case kMenuRowFooter: {
+      // Cycle off -> page -> percent -> chapter time. Persisted: the footer
+      // is a reading preference, not a per-book one.
+      _footerMode = (uint8_t)((_footerMode + 1) % 4);
+      Preferences prefs;
+      if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+        prefs.putUChar(kPrefsFooterKey, _footerMode);
+        prefs.end();
+      }
+      markDirty();
+      return;
+    }
+    case kMenuRowStats:
+      _menu = MenuView::StatsBook;
+      markDirty();
+      return;
+    default:
+      return;
+  }
+}
+
+int ReaderScene::chapterPagesLeft(int* pagesInChapter) {
+  if (!_fbp) return -1;
+  if (_chapCachePage == _fbpPage) {
+    if (pagesInChapter) *pagesInChapter = _chapCacheTotal;
+    return _chapCacheLeft;
+  }
+  int count = 0, cur = 0;
+  chapterCountAndSel(&count, &cur);
+  if (count <= 0) return -1;
+  uint16_t startPage = 0, endPage = _fbp->pageCount();
+  char tmp[2];
+  uint32_t cid = 0;
+  if (_fbp->tocEntry((uint32_t)cur, tmp, sizeof(tmp), &cid)) startPage = _fbp->pageForContentId(cid);
+  if (cur + 1 < count && _fbp->tocEntry((uint32_t)(cur + 1), tmp, sizeof(tmp), &cid))
+    endPage = _fbp->pageForContentId(cid);
+  if (endPage <= _fbpPage) endPage = _fbp->pageCount();
+  if (startPage > _fbpPage) startPage = _fbpPage;
+  _chapCachePage = _fbpPage;
+  _chapCacheLeft = (int)endPage - (int)_fbpPage - 1;
+  _chapCacheTotal = (int)endPage - (int)startPage;
+  if (pagesInChapter) *pagesInChapter = _chapCacheTotal;
+  return _chapCacheLeft;
+}
+
+// --- Bookmarks ----------------------------------------------------------------
+
+void ReaderScene::loadBookmarks() {
+  _markCount = _bookPath.empty()
+                   ? 0
+                   : reader::Bookmarks::load(_bookPath.c_str(), _marks, reader::Bookmarks::kMax);
+  if (_markSel >= _markCount) _markSel = _markCount > 0 ? _markCount - 1 : 0;
+  _markScroll = 0;
+}
+
+// Index of a mark at the current place, or -1.
+bool ReaderScene::bookmarkHereIndex(int* idxOut) {
+  const uint16_t spine = _fbp ? 0 : (uint16_t)_spine;
+  const uint16_t page = _fbp ? _fbpPage : (uint16_t)(_section ? _section->currentPage : 0);
+  for (int i = 0; i < _markCount; i++) {
+    if (_marks[i].spine == spine && _marks[i].page == page) {
+      if (idxOut) *idxOut = i;
+      return true;
+    }
+  }
+  if (idxOut) *idxOut = -1;
+  return false;
+}
+
+// One row, two meanings: mark this page, or remove the mark that's here.
+void ReaderScene::toggleBookmarkHere() {
+  if (_bookPath.empty()) return;
+  int here = -1;
+  if (bookmarkHereIndex(&here)) {
+    if (reader::Bookmarks::remove(_bookPath.c_str(), here) >= 0) loadBookmarks();
+    return;
+  }
+  reader::Bookmarks::Mark m;
+  m.spine = _fbp ? 0 : (uint16_t)_spine;
+  m.page = _fbp ? _fbpPage : (uint16_t)(_section ? _section->currentPage : 0);
+  if (reader::Bookmarks::add(_bookPath.c_str(), m) >= 0) loadBookmarks();
+}
+
+void ReaderScene::jumpToBookmark(int idx) {
+  if (idx < 0 || idx >= _markCount) return;
+  const reader::Bookmarks::Mark m = _marks[idx];
+  _menu = MenuView::None;
+  if (_fbp) {
+    const uint16_t last = _fbp->pageCount() ? (uint16_t)(_fbp->pageCount() - 1) : 0;
+    _fbpPage = m.page > last ? last : m.page;
+    _noteReturn = -1;
+    reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp ? _fbp->pageCount() : 0);
+    streamPos();
+    markDirty();
+    return;
+  }
+  if (!_epub) return;
+  if ((int)m.spine == _spine && _section) {
+    _section->currentPage = m.page < _section->pageCount ? m.page : 0;
+    markDirty();
+    return;
+  }
+  _spine = m.spine;
+  _nextPage = m.page;
+  ensureSectionOrIndex();
+}
+
+// Chapter list size and the reader's current chapter index.
+void ReaderScene::chapterCountAndSel(int* count, int* selOut) {
+  int n = 0, sel = 0;
+  if (_fbp) {
+    n = (int)_fbp->tocCount();
+    // Current chapter = last TOC entry that opens on or before this page.
+    //
+    // That used to be a walk: ask "which page does this row open on?" for
+    // every row until one passed the current page. Each answer is its own
+    // binary search over the page index, on the SD card, so the cost grew
+    // with how far into the book you were — and this runs on EVERY frame of
+    // the chapter menu, so it was paid again on every keypress. That is
+    // report #43's second half: "if I'm loaded in the later chapters it is
+    // very very sluggish, 10 to 15 seconds".
+    //
+    // Ask the inverse question once. A row belongs to this page or an
+    // earlier one exactly when its content id is below the id the NEXT page
+    // opens with, so one lookup gives the cutoff and a binary search over
+    // the rows finds the last one under it. Rows are in reading order in
+    // both package formats, which is what makes the search legal.
+    if (n > 0) {
+      uint32_t limit = UINT32_MAX, nextCid = 0;
+      if (_fbpPage + 1 < _fbp->pageCount() &&
+          _fbp->pageFirstCidPublic((uint16_t)(_fbpPage + 1), &nextCid))
+        limit = nextCid;
+      int lo = 0, hi = n - 1;
+      while (lo <= hi) {
+        const int mid = (lo + hi) / 2;
+        uint32_t cid = 0;
+        char tmp[2];
+        if (!_fbp->tocEntry((uint32_t)mid, tmp, sizeof(tmp), &cid)) break;
+        if (cid < limit) {
+          sel = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+    }
+  } else if (_epub) {
+    // Real chapters when the book declares a TOC; spine sections otherwise
+    // (see renderChapters — a spine counts cover/title/copyright as "chapters",
+    // which is what made the menu disagree with the book, #42).
+    const int tocCount = _epub->getTocItemsCount();
+    if (tocCount > 0) {
+      n = tocCount;
+      const int cur = _epub->getTocIndexForSpineIndex(_spine);
+      sel = cur >= 0 ? cur : 0;
+    } else {
+      n = _epub->getSpineItemsCount();
+      sel = _spine;
+    }
+  }
+  if (count) *count = n;
+  if (selOut) *selOut = sel;
+}
+
+// --- Word cursor ----------------------------------------------------------------
+
+void ReaderScene::enterWordMode() {
+  if (!_fbp || !_fbp->hasWordBoxes()) return;
+  _wcMode = true;
+  _wcSheet = false;
+#ifdef FLOWE_PREPARED_GUIDE
+  _wcGuide = false;
+  _guideBound = false;
+#endif
+  _wcNeedLoad = true;
+  _wcPendingEdge = 0;
+  _wcCount = 0;
+  _wcIdx = 0;
+  _menu = MenuView::None;
+  markDirty();
+}
+
+// Called from render() once the page is on the framebuffer, because the
+// boxes live in the page buffer renderPage just filled.
+void ReaderScene::wordLoad() {
+  _wcNeedLoad = false;
+  _wcCount = _fbp ? _fbp->pageWords(_wcWords, kMaxPageWords) : 0;
+  if (_wcCount == 0) {
+    _wcIdx = 0;
+    return;
+  }
+  if (_wcPendingEdge > 0) {
+    _wcIdx = 0;
+  } else if (_wcPendingEdge < 0) {
+    _wcIdx = _wcCount - 1;
+  } else {
+    // CrossPoint's rule: start on the middle line's word nearest the
+    // centre, so the first word you want is never far.
+    const int midLine = _fbp->lineCidCount() / 2;
+    const int midX = _fbp ? 264 : 0;
+    int best = 0, bestD = 1 << 30;
+    for (uint16_t i = 0; i < _wcCount; i++) {
+      const int dl = (int)_wcWords[i].line - midLine;
+      const int dx = (_wcWords[i].x + _wcWords[i].w / 2) - midX;
+      const int d = (dl < 0 ? -dl : dl) * 1000 + (dx < 0 ? -dx : dx);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    _wcIdx = best;
+  }
+  _wcPendingEdge = 0;
+}
+
+void ReaderScene::wordMove(int dir) {
+  if (_wcCount == 0) return;
+  const int next = _wcIdx + dir;
+  if (next >= 0 && next < (int)_wcCount) {
+    _wcIdx = next;
+    markDirty();
+    return;
+  }
+  // Off the edge: turn the page and land on its near end once it renders.
+  if (!_fbp) return;
+  const uint16_t last = _fbp->pageCount() ? (uint16_t)(_fbp->pageCount() - 1) : 0;
+  if (dir > 0 && _fbpPage >= last) return;
+  if (dir < 0 && _fbpPage == 0) return;
+  _wcPendingEdge = (int8_t)dir;
+  _wcNeedLoad = true;
+  fbpTurn(dir > 0);
+}
+
+void ReaderScene::wordMoveLine(int dir) {
+  if (_wcCount == 0) return;
+  const int line = _wcWords[_wcIdx].line;
+  const int cx = _wcWords[_wcIdx].x + _wcWords[_wcIdx].w / 2;
+  // The nearest line in that direction that has a word, then the word
+  // whose centre is closest in x.
+  int target = -1;
+  for (uint16_t i = 0; i < _wcCount; i++) {
+    const int l = _wcWords[i].line;
+    if (dir > 0 ? l > line : l < line) {
+      if (target < 0 || (dir > 0 ? l < target : l > target)) target = l;
+    }
+  }
+  if (target < 0) {
+    wordMove(dir);  // no such line on this page: the page turns
+    return;
+  }
+  int best = -1, bestD = 1 << 30;
+  for (uint16_t i = 0; i < _wcCount; i++) {
+    if (_wcWords[i].line != target) continue;
+    const int d = (_wcWords[i].x + _wcWords[i].w / 2) - cx;
+    const int ad = d < 0 ? -d : d;
+    if (ad < bestD) { bestD = ad; best = i; }
+  }
+  if (best >= 0) {
+    _wcIdx = best;
+    markDirty();
+  }
+}
+
+// A footnote mark under the cursor: the word is a bare number, "[3]", "*"
+// or a dagger, and its paragraph carries a note. The n-th such mark in the
+// paragraph on this page maps to the n-th note of that paragraph.
+int ReaderScene::wordNoteIndex() {
+  if (!_fbp || _wcCount == 0) return -1;
+  uint32_t first = 0;
+  const int n = notesHere(&first);
+  if (n <= 0) return -1;
+  const reader::FbpBook::WordBox& w = _wcWords[_wcIdx];
+  // The compiler flags a mark's own box (bit 1). A bare number, "[3]", "*"
+  // or a dagger counts too, for books whose marks were not tagged.
+  auto isMark = [this](const reader::FbpBook::WordBox& b) {
+    if (b.flags & 2) return true;
+    char t[48];
+    _fbp->wordText(b, t, sizeof(t));
+    if (!t[0] || strlen(t) > 4) return false;
+    for (const char* c = t; *c; c++)
+      if (!((*c >= '0' && *c <= '9') || *c == '*' || (unsigned char)*c >= 0x80)) return false;
+    return true;
+  };
+  if (!isMark(w)) return -1;
+  const uint32_t cid = _fbp->lineCid(w.line);
+  int rank = 0;  // marks before this one in the same paragraph on this page
+  for (int i = 0; i < _wcIdx; i++)
+    if (_fbp->lineCid(_wcWords[i].line) == cid && isMark(_wcWords[i])) rank++;
+  for (int i = 0; i < n; i++) {
+    uint32_t from = 0;
+    if (!_fbp->noteEntry(first + (uint32_t)i, &from, nullptr)) break;
+    if (from != cid) continue;
+    if (rank == 0) return i;
+    rank--;
+  }
+  return -1;
+}
+
+void ReaderScene::handleWordInput(Input& in) {
+#ifdef FLOWE_PREPARED_GUIDE
+  if (_wcSheet && _wcGuide) {
+    if (in.wasPressed(Btn::Back)) { _wcGuide = _wcSheet = false; markDirty(); }
+    else if (in.wasPressed(Btn::Confirm)) { _wcGuide = _wcSheet = _wcMode = false; markDirty(); }
+    return;
+  }
+  if (!_wcSheet && in.wasLongPressed(Btn::Confirm)) { openWordGuide(); return; }
+#endif
+  if (_wcSheet) {
+    if (in.wasPressed(Btn::Back)) {
+      _wcSheet = false;
+      markDirty();
+    } else if (_wcDefFound && (in.wasPressed(Btn::Up) || in.wasPressed(Btn::Down) || backKey(in) || fwdKey(in))) {
+      // A long entry scrolls three lines at a time.
+      const bool up = in.wasPressed(Btn::Up) || backKey(in);
+      if (up && _wcScroll > 0) _wcScroll -= 3;
+      else if (!up) _wcScroll += 3;
+      if (_wcScroll < 0) _wcScroll = 0;
+      markDirty();
+    } else if (in.wasPressed(Btn::Confirm)) {
+      const int note = wordNoteIndex();
+      if (note >= 0) {
+        _wcMode = _wcSheet = false;
+        noteJump(note);
+      } else {
+        _wcSheet = false;  // no dictionary yet: GO just closes the sheet
+        markDirty();
+      }
+    }
+    return;
+  }
+  if (in.wasPressed(Btn::Back)) {
+    _wcMode = false;
+    markDirty();
+    return;
+  }
+  if (in.wasPressed(Btn::Confirm)) {
+    if (_wcCount == 0) return;
+    _fbp->wordText(_wcWords[_wcIdx], _wcWord, sizeof(_wcWord));
+    _wcScroll = 0;
+    _wcDefFound = false;
+    _wcDictPresent = reader::Dictionary::present();
+    if (_wcDictPresent && wordNoteIndex() < 0) {
+      CpuBoost boost;
+      _wcDefFound = reader::Dictionary::lookup(_wcWord, _wcHead, sizeof(_wcHead), _wcDef, sizeof(_wcDef));
+    }
+    _wcSheet = true;
+    markDirty();
+    return;
+  }
+  if (in.wasPressed(Btn::Up)) { wordMoveLine(-1); return; }
+  if (in.wasPressed(Btn::Down)) { wordMoveLine(+1); return; }
+  // Tap = one word. Hold = a word every 250 ms after half a second, read
+  // from the debounced level like the Chapters list (a tap only reports on
+  // release, so a hold armed from taps never repeats).
+  const Btn prevBtn = dirSwap() ? Btn::Right : Btn::Left;
+  const Btn nextBtn = dirSwap() ? Btn::Left : Btn::Right;
+  const uint32_t nowMs = millis();
+  if (in.isPressed(prevBtn) || in.isPressed(nextBtn)) {
+    const int dir = in.isPressed(nextBtn) ? +1 : -1;
+    if (_wcRepeatNextMs == 0) {
+      _wcRepeatNextMs = nowMs + 500;
+    } else if (nowMs >= _wcRepeatNextMs) {
+      _wcRepeatNextMs = nowMs + 250;
+      wordMove(dir);
+    }
+    return;
+  }
+  const bool held = _wcRepeatNextMs != 0 && nowMs >= _wcRepeatNextMs;
+  _wcRepeatNextMs = 0;
+  if (held) return;  // the release after a repeat is not a tap
+  if (backKey(in)) wordMove(-1);
+  else if (fwdKey(in)) wordMove(+1);
+}
+
+#ifdef FLOWE_PREPARED_GUIDE
+void ReaderScene::openWordGuide() {
+  if (!_fbp || !_wcCount || _wcIdx < 0 || _wcIdx >= _wcCount) return;
+  SCENES.waitFlushIdle();
+  CpuBoost boost;
+  _fbp->wordText(_wcWords[_wcIdx], _wcWord, sizeof(_wcWord));
+  char key[64]; reader::FbpBook::canonicalKey(baseName(_bookPath.c_str()), key, sizeof(key));
+  const uint32_t before = _fbp->lineCid(_wcWords[_wcIdx].line);
+  const auto result = prepared_reader::lookup(_bookPath.c_str(), key, _wcWord, before,
+      _guideHash, _guideBound, _guideCid, _wcDef, sizeof(_wcDef));
+  _wcDefFound = result == prepared_reader::Result::Found;
+  if (!_wcDefFound) {
+    const char* message = result == prepared_reader::Result::Missing ? "No prepared guide for this book."
+        : result == prepared_reader::Result::Invalid ? "This guide is incomplete or belongs to a different book."
+        : result == prepared_reader::Result::UnsupportedWord ? "This test supports single English words."
+        : "No earlier passage for this word in the prepared guide.";
+    snprintf(_wcDef, sizeof(_wcDef), "%s", message);
+  }
+  _wcGuide = _wcSheet = true;
+  Serial.printf("[reader-guide] view result=%u page=%u word=%d before=%lu\n", (unsigned)result, _fbpPage, _wcIdx, (unsigned long)before);
+  markDirty();
+}
+
+void ReaderScene::renderWordGuide(Gfx& gfx) {
+  const int w = contentRight(gfx, 0), h = gfx.height();
+  gfx.clear();
+  gfx.drawText(kFontBold, 24, 35, "Book guide");
+  char shown[64]; truncateToWidth(gfx, kFontBold, _wcWord, w-48, shown, sizeof(shown));
+  gfx.drawText(kFontBold, 24, 100, shown);
+  char label[64];
+  if (_wcDefFound) snprintf(label, sizeof(label), "Earlier passage / source %lu", (unsigned long)_guideCid);
+  else snprintf(label, sizeof(label), "No passage available");
+  gfx.drawText(kFontSmall, 24, 147, label);
+  gfx.fillRect(24, 187, w-48, 2, true);
+  const int lines = (h-135-218) / gfx.lineHeight(kFontRegular);
+  gfx.drawTextWrapped(kFontRegular, 24, 218, _wcDef, w-48, lines>0?lines:1);
+  gfx.fillRect(24, h-115, w-48, 2, true);
+  gfx.drawText(kFontSmall, 24, h-97, "Source text prepared on your phone.");
+  gfx.drawText(kFontSmall, 24, h-68, "BACK: selected word   READ: same page");
+}
+#endif
+
+void ReaderScene::renderWordCursor(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  if (_wcCount > 0 && _wcIdx < (int)_wcCount) {
+    const reader::FbpBook::WordBox& b = _wcWords[_wcIdx];
+    const int px = _fbp ? _fbp->pxSize() : 22;
+    const int base = _fbp ? _fbp->lineBaseline(b.line) : 0;
+    // A 2 px box around the word: ascender to descender at this size.
+    const int top = base - (px * 9) / 10 - 2;
+    const int h = (px * 12) / 10 + 4;
+    gfx.drawRect(b.x - 3, top, b.w + 6, h, 2, true);
+  }
+  // The band: what the keys do here, and the word under the cursor.
+#ifdef FLOWE_PREPARED_GUIDE
+  gfx.fillRect(0, gfx.height()-58, w, 32, false);
+  gfx.drawText(kFontSmall, 24, gfx.height()-56, "Hold GO for book guide");
+#endif
+  const int capH = gfx.capHeight(kFontSmall);
+  const int capOff = gfx.capTopOffset(kFontSmall);
+  const int bandMid = gfx.height() - 12;
+  const int textY = bandMid - capH / 2 - capOff;
+  gfx.fillRect(0, gfx.height() - 26, w, 26, false);
+  gfx.drawTextCentered(kFontSmall, Scene::softKeySlotCenterX(gfx, 0), textY, "BACK");
+  gfx.drawTextCentered(kFontSmall, Scene::softKeySlotCenterX(gfx, 1), textY, "GO");
+  drawMiniArrow(gfx, Scene::softKeySlotCenterX(gfx, 2), bandMid, /*right=*/false);
+  drawMiniArrow(gfx, Scene::softKeySlotCenterX(gfx, 3), bandMid, /*right=*/true);
+  if (_wcCount == 0)
+    gfx.drawText(kFontSmall, w - 16 - gfx.textWidth(kFontSmall, "no words"), textY, "no words");
+}
+
+void ReaderScene::renderWordSheet(Gfx& gfx) {
+#ifdef FLOWE_PREPARED_GUIDE
+  if (_wcGuide) { renderWordGuide(gfx); return; }
+#endif
+  const int w = contentRight(gfx, 0);
+  const int note = wordNoteIndex();
+  // A found entry gets the lower half of the page; the other cases a strip.
+  const int sheetH = _wcDefFound ? gfx.height() / 2 : 150;
+  const int y0 = gfx.height() - 44 - sheetH;
+  gfx.fillRect(12, y0, w - 24, sheetH, false);
+  gfx.drawRect(12, y0, w - 24, sheetH, 2, true);
+  int y = y0 + 14;
+  char shown[64];
+  truncateToWidth(gfx, kFontBold, _wcDefFound ? _wcHead : _wcWord, w - 64, shown, sizeof(shown));
+  gfx.drawText(kFontBold, 28, y, shown);
+  if (_wcDefFound && strcmp(_wcHead, _wcWord) != 0) {
+    // The entry is for the base word: say which word was looked up.
+    char from[72];
+    snprintf(from, sizeof(from), "for %s", _wcWord);
+    const int fw = gfx.textWidth(kFontSmall, from);
+    if (fw < w - 64 - gfx.textWidth(kFontBold, shown) - 16)
+      gfx.drawText(kFontSmall, w - 28 - fw, y + 6, from);
+  }
+  y += gfx.lineHeight(kFontBold) + 6;
+  if (note >= 0) {
+    gfx.fillRect(20, y, w - 40, 34, true);
+    gfx.drawText(kFontRegular, 28, y + 3, "Open note", false);
+    y += 40;
+    gfx.drawText(kFontSmall, 28, y, "GO opens it. BACK closes.");
+    return;
+  }
+  if (_wcDefFound) {
+    // Senses are separated by " | " and parts of speech by "; " in the
+    // file; on the glass each sense starts its own line.
+    const int lh = gfx.lineHeight(kFontSmall);
+    const int maxLines = (y0 + sheetH - 12 - y) / lh;
+    char line[256];
+    int lineNo = 0, drawn = 0;
+    const char* p = _wcDef;
+    while (*p && drawn < maxLines) {
+      const char* sep = strstr(p, " | ");
+      const char* sep2 = strstr(p, "; ");
+      if (sep2 && (!sep || sep2 < sep)) sep = sep2;
+      const size_t seg = sep ? (size_t)(sep - p) : strlen(p);
+      snprintf(line, sizeof(line), "%.*s", (int)(seg < sizeof(line) - 1 ? seg : sizeof(line) - 1), p);
+      // Count the lines this sense wraps to, so scrolling skips whole senses.
+      const int need = gfx.drawTextWrapped(kFontSmall, 28, -1000, line, w - 56, 6);
+      if (lineNo >= _wcScroll) {
+        gfx.drawTextWrapped(kFontSmall, 28, y, line, w - 56, maxLines - drawn);
+        const int took = need < maxLines - drawn ? need : maxLines - drawn;
+        y += took * lh;
+        drawn += took;
+      }
+      lineNo += need;
+      p = sep ? sep + (sep == sep2 ? 2 : 3) : p + seg;
+    }
+    return;
+  }
+  if (_wcDictPresent) {
+    gfx.drawTextWrapped(kFontSmall, 28, y, "Not in the dictionary.", w - 56, 1);
+  } else {
+    gfx.drawTextWrapped(kFontSmall, 28, y, "No dictionary on the card yet. Settings > Dictionary in the app copies one over.", w - 56, 3);
+    y += 2 * gfx.lineHeight(kFontSmall);
+  }
+  y += gfx.lineHeight(kFontSmall) + 4;
+  gfx.drawText(kFontSmall, 28, y, "BACK closes.");
+}
+
+// --- Footnotes (C3) -----------------------------------------------------------
+
+int ReaderScene::notesHere(uint32_t* first) {
+  if (!_fbp || !_fbp->noteCount()) return 0;
+  const uint16_t pages = (uint16_t)_fbp->pageCount();
+  // Exact answer: the marks the compiler flagged on the page as drawn
+  // (pass A, 2026-09-06: the anchor guess put a paragraph's notes on the
+  // page where the paragraph ENDS). The guess stays for a page that has
+  // not been drawn yet, and is replaced once it has.
+  const bool exact = _fbp->hasWordBoxes() && _fbp->wordBoxesPage() == _fbpPage;
+  if (_noteCachePage != _fbpPage || _noteCachePages != pages || (exact && !_noteCacheExact)) {
+    uint32_t f = 0;
+    if (exact) {
+      uint32_t cids[16];
+      const uint16_t n = _fbp->pageMarkCids(cids, 16);
+      uint32_t lo = 0xFFFFFFFFu, hi = 0;
+      for (uint16_t i = 0; i < n; i++) {
+        if (cids[i] < lo) lo = cids[i];
+        if (cids[i] > hi) hi = cids[i];
+      }
+      _noteCacheCount = n ? (int)_fbp->notesInCidRange(lo, hi, &f) : 0;
+    } else {
+      _noteCacheCount = (int)_fbp->notesOnPage(_fbpPage, &f);
+    }
+    _noteCacheFirst = f;
+    _noteCachePage = _fbpPage;
+    _noteCachePages = pages;
+    _noteCacheExact = exact;
+  }
+  if (first) *first = _noteCacheFirst;
+  return _noteCacheCount;
+}
+
+void ReaderScene::noteJump(int idx) {
+  uint32_t first = 0;
+  const int n = notesHere(&first);
+  if (!_fbp || idx < 0 || idx >= n) return;
+  uint32_t to = 0;
+  if (!_fbp->noteEntry(first + (uint32_t)idx, nullptr, &to) || !to) return;
+  const uint16_t target = _fbp->pageForContentId(to);
+  // Keep the FIRST origin: a note that points at another note still
+  // returns to the page the reader was on.
+  if (_noteReturn < 0) _noteReturn = _fbpPage;
+  _fbpPage = target;
+  _menu = MenuView::None;
+  markDirty();
+}
+
+void ReaderScene::noteReturn() {
+  if (_noteReturn < 0 || !_fbp) return;
+  const uint16_t last = _fbp->pageCount() ? (uint16_t)(_fbp->pageCount() - 1) : 0;
+  const uint16_t back = (uint16_t)_noteReturn;
+  _fbpPage = back > last ? last : back;
+  _noteReturn = -1;
+  reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp->pageCount());
+  streamPos();
+  markDirty();
+}
+
+void ReaderScene::renderNotes(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
+  uint32_t first = 0;
+  const int n = notesHere(&first);
+  gfx.drawText(kFontBold, 20, 10, "Footnotes");
+  char hdr[24];
+  snprintf(hdr, sizeof(hdr), "%d / %d", n > 0 ? _noteSel + 1 : 0, n);
+  gfx.drawText(kFontRegular, w - 20 - gfx.textWidth(kFontRegular, hdr), 10, hdr);
+  gfx.fillRect(0, 44, w, 2, true);
+  if (n <= 0) {
+    gfx.drawTextCentered(kFontRegular, w / 2, 120, "No footnotes on this page");
+    return;
+  }
+  const int rowH = 46;
+  const int listTop = 56;
+  const int visible = (contentBottom(gfx, 0) - listTop - 30) / rowH;
+  int scroll = 0;
+  if (_noteSel >= visible) scroll = _noteSel - visible + 1;
+  char line[48];
+  char right[16];
+  for (int i = 0; i < visible && scroll + i < n; i++) {
+    const int idx = scroll + i;
+    const int y = listTop + i * rowH;
+    const bool sel = idx == _noteSel;
+    if (sel) gfx.fillRect(0, y, w, rowH - 4, true);
+    const int textY = y + (rowH - 4 - gfx.lineHeight(kFontRegular)) / 2;
+    uint32_t to = 0;
+    right[0] = 0;
+    if (_fbp->noteEntry(first + (uint32_t)idx, nullptr, &to) && to)
+      snprintf(right, sizeof(right), "p%u", (unsigned)_fbp->pageForContentId(to) + 1);
+    // Marks on one page are numbered in reading order. The book's own
+    // numbers live inside the page image, which the reader cannot read.
+    snprintf(line, sizeof(line), "Mark %d on this page", idx + 1);
+    gfx.drawText(sel ? kFontBold : kFontRegular, 20, textY, line, !sel);
+    if (right[0])
+      gfx.drawText(kFontRegular, w - 20 - gfx.textWidth(kFontRegular, right), textY, right, !sel);
+  }
+  gfx.drawTextCentered(kFontSmall, w / 2, contentBottom(gfx, 0) - 26, "GO opens the note. RETURN comes back.");
+}
+
+void ReaderScene::chapterJump(int idx) {
+  if (_fbp) {
+    uint32_t cid = 0;
+    char tmp[2];
+    if (!_fbp->tocEntry((uint32_t)idx, tmp, sizeof(tmp), &cid)) return;
+    _fbpPage = _fbp->pageForContentId(cid);
+    _noteReturn = -1;  // a deliberate jump ends the footnote trip
+    reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp ? _fbp->pageCount() : 0);
+    streamPos();
+    _menu = MenuView::None;
+    markDirty();
+    return;
+  }
+  if (!_epub) return;
+  _menu = MenuView::None;
+  // With a TOC the row index is a CHAPTER; translate it to the spine file
+  // that chapter opens in. Without one the row is already a spine index.
+  int target = idx;
+  if (_epub->getTocItemsCount() > 0) {
+    const int mapped = _epub->getSpineIndexForTocIndex(idx);
+    if (mapped < 0) return;  // TOC entry we could not resolve — do nothing
+    target = mapped;
+  }
+  if (target == _spine) {
+    markDirty();
+    return;
+  }
+  _spine = target;
+  _nextPage = 0;
+  ensureSectionOrIndex();
+}
+
+// Whole-book progress fraction, both engines.
+float ReaderScene::bookProgress() {
+  if (_fbp && _fbp->pageCount() > 0)
+    return (float)(_fbpPage + 1) / (float)_fbp->pageCount();
+  if (_epub && _section && _section->pageCount > 0) {
+    const float chapterProgress = (float)(_section->currentPage + 1) / (float)_section->pageCount;
+    return _epub->calculateProgress(_spine, chapterProgress);
+  }
+  return 0.0f;
+}
+
+// Minutes left at the measured session pace; -1 = no pace data yet.
+int ReaderScene::estimateMinutesLeft(int pagesLeft) const {
+  if (pagesLeft <= 0) return 0;
+  // KOReader's rule: before any turn is measured, assume 60 s a page.
+  const uint32_t pace = _avgTurnMs ? _avgTurnMs : 60000;
+  const uint32_t min = ((uint32_t)pagesLeft * pace + 59999) / 60000;
+  return (int)(min < 1 ? 1 : min);
+}
+
+// EMA of the gap between forward turns; only plausible reading gaps count
+// (3 s – 3 min), so a coffee break or a fast flip-through doesn't skew the
+// overlay's time-left line.
+void ReaderScene::noteTurnPace() {
+  const uint32_t now = millis();
+  if (_lastTurnMs != 0) {
+    const uint32_t d = now - _lastTurnMs;
+    if (d >= 3000 && d <= 180000) {
+      _avgTurnMs = _avgTurnMs ? (3 * _avgTurnMs + d) / 4 : d;
+    }
+  }
+  _lastTurnMs = now;
+}
+
+void ReaderScene::renderFbp(Gfx& gfx) {
+  if (!_fbp) {
+    renderMessage(gfx, "Read", "No book open");
+    return;
+  }
+  if (!_fbp->profileSelected()) {
+    uint16_t preferPx = 0;
+    Preferences prefs;
+    if (prefs.begin(kPrefsNamespace, /*readOnly=*/true)) {
+      preferPx = prefs.getUShort("fbpPx", 0);
+      prefs.end();
+    }
+    // contentRight, not width(): in landscape the soft-key column eats the
+    // right edge and the compiled landscape profiles are that much narrower.
+    if (!_fbp->selectProfile((uint16_t)contentRight(gfx, 0), (uint16_t)gfx.height(), preferPx)) {
+      if (!_fbp->lastFailNoMemory()) {
+        renderMessage(gfx, "Read", "Package profile mismatch");
+        return;
+      }
+      // No page buffer fits. Seen 2026-09-06 on the X3 right after a Wi-Fi
+      // session ended in place: the session's residue plus the returning
+      // BLE stack left 17 KB free, and Project Hail Mary needs 10 KB in one
+      // piece. A quiet restart (3 s, no splash) gives the book a clean
+      // heap and lands back here. Once only: a second failure in a row
+      // says so and stays put.
+      bool restartedAlready = false;
+      {
+        Preferences prefs;
+        if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+          restartedAlready = prefs.getUChar("oomBoot", 0) != 0;
+          if (restartedAlready) prefs.remove("oomBoot");
+          else prefs.putUChar("oomBoot", 1);
+          prefs.end();
+        }
+      }
+      Serial.printf("[xphone-os] reader: no room for a page buffer (free=%u largest=%u)%s\n",
+                    ESP.getFreeHeap(),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+                    restartedAlready ? "; already restarted once, giving up" : "; restarting quietly");
+      if (restartedAlready) {
+        renderMessage(gfx, "Read", "Not enough memory for this book");
+        return;
+      }
+      renderMessage(gfx, "Read", "Freeing memory...");
+      _oomRestartPending = true;
+      return;
+    }
+    {
+      Preferences prefs;  // the book opened: a later shortage may restart again
+      if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+        if (prefs.isKey("oomBoot")) prefs.remove("oomBoot");
+        prefs.end();
+      }
+    }
+  }
+  if (_fbpPosPending) {
+    _fbpPage = reader::FbpBook::loadPos(_bookPath.c_str(), _fbp->pageCount());
+    _lastPageCount = (uint16_t)_fbp->pageCount();  // known from the moment the book opens
+    {
+      char side[192];
+      snprintf(side, sizeof(side), "%s.done", _bookPath.c_str());
+      _bookDone = SdMan.exists(side);
+    }
+    if (_offerGotoCid) {
+      // X1: this open came from a confirmed phone goto — land there, not at
+      // the saved place. The saved place is untouched until a real turn.
+      _fbpPage = _fbp->pageForContentId(_offerGotoCid);
+      _offerGotoCid = 0;
+    }
+    _fbpPosPending = false;
+    streamPos();  // F1: the session's opening position starts the stream
+  }
+  if (_fbpPage >= _fbp->pageCount()) _fbpPage = _fbp->pageCount() ? _fbp->pageCount() - 1 : 0;
+  {
+    CpuBoost boost;  // blits are pure CPU
+    const uint32_t t0 = millis();
+    const bool drew = _fbp->renderPage(gfx, _fbpPage);
+    Serial.printf("[xphone-os] fbp: page %u/%u %s in %lu ms heap=%u peak=%lu uniq=%lu\n",
+                  _fbpPage + 1, _fbp->pageCount(), drew ? "composed" : "BLANK",
+                  static_cast<unsigned long>(millis() - t0),
+                  ESP.getFreeHeap(), (unsigned long)_fbp->lastPeakBytes(),
+                  (unsigned long)_fbp->lastUniqGlyphs());
+  }
+  // Reading chrome (portrait) or the centered footer (landscape, where the
+  // tab column keeps the standard bar). Menu strips own the band while
+  // open, and highlight-pick mode owns it while active (its hint strip is
+  // drawn above).
+  if (_wcMode) {
+    if (_wcNeedLoad) wordLoad();
+    renderWordCursor(gfx);
+    if (_wcSheet) renderWordSheet(gfx);
+    return;
+  }
+  if (_menu == MenuView::None && !_hlMode) {
+    if (_landscape) {
+      char footer[32];
+      snprintf(footer, sizeof(footer), "%u / %u", _fbpPage + 1, _fbp->pageCount());
+      const int stripY = contentBottom(gfx, 0) - kStatusH + 4;
+      gfx.drawTextCentered(kFontSmall, contentRight(gfx, 0) / 2, stripY, footer);
+    } else {
+      renderReadingChrome(gfx);
+    }
+  }
+}
+
 void ReaderScene::workBuildSection() {
   if (!_epub || !_section) {
-    failWith(L10N("Couldn't index this chapter", "Impossibile indicizzare il capitolo"));
+    failWith("Couldn't index this section");
     return;
   }
   // BLOCKING: zip inflate + expat SAX + DP line break + serialize, up to
@@ -381,18 +2239,27 @@ void ReaderScene::workBuildSection() {
   const uint32_t t0 = millis();
   if (!_section->createSectionFile(_settings) || !_section->loadSectionFile(_settings)) {
     _section.reset();
-    failWith(L10N("Couldn't index this chapter", "Impossibile indicizzare il capitolo"));
+    failWith("Couldn't index this section");
     return;
   }
   Serial.printf("[xphone-os] reader: indexed spine %d: %u pages in %lu ms, heap=%u\n", _spine,
                 _section->pageCount, static_cast<unsigned long>(millis() - t0), ESP.getFreeHeap());
+  // First indexed chapter of this book: if most of its text is outside the
+  // built-in fonts (Hebrew, Arabic, CJK), interpose the sync-with-app notice
+  // instead of pages of replacement boxes. 200-glyph floor keeps a short
+  // front-matter chapter from deciding for the whole book.
+  if (!_coverageChecked && _measure && _measure->glyphsSeen() >= 200) {
+    _coverageChecked = true;
+    if (_measure->glyphsMissing() * 10 >= _measure->glyphsSeen()) {
+      _coverageNotice = true;
+      Serial.printf("[xphone-os] reader: %lu of %lu glyphs not in the built-in fonts; showing sync notice\n",
+                    static_cast<unsigned long>(_measure->glyphsMissing()),
+                    static_cast<unsigned long>(_measure->glyphsSeen()));
+    }
+  }
   applyPendingPage();
   _state = State::Reading;
   reader::ReadingStats::sessionStart(_bookPath);
-  if (_turnAwaitsIndex) {
-    _turnAwaitsIndex = false;
-    reader::ReadingStats::pageTurn();  // the chapter roll that armed this build is now on glass
-  }
   markDirty();
 }
 
@@ -420,14 +2287,20 @@ void ReaderScene::workGridMeta() {
   if (_state != State::BookList) return;  // state moved on while armed — drop
   int idx = -1;
   const int perPage = kGridCols * kGridRows;
-  for (int i = 0; i < perPage && _scroll + i < _bookCount; i++) {
-    if (_books[_scroll + i].meta == TileMeta::Unknown) {
+  for (int i = 0; i < perPage && _scroll + i < _totalBooks; i++) {
+    if (!inWindow(_scroll + i)) continue;  // window mid-move; render will rescan
+    if (entryAt(_scroll + i).meta == TileMeta::Unknown) {
       idx = _scroll + i;
       break;
     }
   }
   if (idx < 0) return;  // scroll moved past the tiles that armed us
-  BookEntry& b = _books[idx];
+  BookEntry& b = entryAt(idx);
+
+  // R5: a build unit needs the quiet heap. If scrolling revealed an unbuilt
+  // EPUB while the radio was up, pause it just-in-time (suspend also claims
+  // the decoder scratch); packages never trigger this.
+  if (!endsWithFbpCI(b.path) && !_radioSuspended) suspendRadioForBookWork();
 
   // ONE unit per quiet tick: load the book.bin cache, BUILDING it if missing so
   // a never-opened book still gets a title + cover on the grid (build is only
@@ -440,11 +2313,38 @@ void ReaderScene::workGridMeta() {
   const uint32_t t0 = millis();
   const std::unique_ptr<reader::Epub> epub(new (std::nothrow)
                                                reader::Epub(b.path, reader::kReaderCacheRoot));
+  // A book that failed to build before is REMEMBERED (meta.unreadable
+  // sentinel): without it, every shelf rescan forgot the verdict and every
+  // visible tick re-ran the whole failing build — the tile said
+  // "unreadable", then "...", then "unreadable" forever (audit I3).
+  if (epub && SdMan.exists((epub->getCachePath() + "/meta.unreadable").c_str())) {
+    b.meta = TileMeta::NotOpened;
+    markDirty(tileRect(idx - _scroll));
+    return;
+  }
+  // An EPUB load allocates strings and vectors that abort() the device on
+  // a starved heap (exceptions are off, so a failed new is fatal). Refuse
+  // the load when the heap cannot plausibly carry it: the tile stays plain
+  // and retries on the next visit, under the pause, with a full heap.
+  if (epub && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 24 * 1024) {
+    Serial.printf("[xphone-os] reader: grid meta '%s' deferred, heap too tight (largest=%u)\n",
+                  baseName(b.path),
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    b.meta = TileMeta::NoCover;
+    markDirty(tileRect(idx - _scroll));
+    return;
+  }
   if (!epub || !epub->load(/*buildIfMissing=*/true)) {
     b.meta = TileMeta::NotOpened;
+    if (epub) {
+      FsFile f = SdMan.open((epub->getCachePath() + "/meta.unreadable").c_str(),
+                            O_WRONLY | O_CREAT | O_TRUNC);
+      if (f) f.close();
+    }
   } else {
     const std::string& title = epub->getTitle();
-    snprintf(b.title, sizeof(b.title), "%s", title.empty() ? baseName(b.path) : title.c_str());
+    if (title.empty()) prettyFileTitle(b.path, b.title, sizeof(b.title));
+    else snprintf(b.title, sizeof(b.title), "%s", title.c_str());
     snprintf(b.author, sizeof(b.author), "%s", epub->getAuthor().c_str());
     b.meta = TileMeta::NoCover;  // coverless AND transient failures render text-only
     std::string thumbPath;
@@ -452,6 +2352,7 @@ void ReaderScene::workGridMeta() {
         thumbPath.size() < sizeof(b.thumbPath) && readThumbDims(thumbPath.c_str(), &b.thumbW, &b.thumbH)) {
       memcpy(b.thumbPath, thumbPath.c_str(), thumbPath.size() + 1);
       b.meta = TileMeta::Cover;
+      publishCoverSidecar(b.path, thumbPath.c_str());
     }
   }
   Serial.printf("[xphone-os] reader: grid meta '%s' -> %d (%lu ms) heap=%u\n", baseName(b.path),
@@ -459,6 +2360,19 @@ void ReaderScene::workGridMeta() {
   // Repaint just this tile; that render re-arms GridMeta if visible tiles
   // still need work (renderBookList owns the arming).
   markDirty(tileRect(idx - _scroll));
+
+  // R5: the pause ends with the last visible build — mid-scene, in the
+  // M4.2-safe order: the 58 KB scratch goes back to the heap FIRST, then
+  // the radio starts into the clean plain. The phone reconnects on its
+  // own, the proven post-transfer pattern.
+  if (_state == State::BookList && _radioSuspended && !shelfQuietBuildPending()) {
+    reader::CoverThumb::releaseScratch();
+    _radioSuspended = false;
+    COMPANION_BLE.resumeAfterReader();
+    Serial.printf("[xphone-os] shelf: builds done, radio resumed (heap=%u largest=%u)\n",
+                  ESP.getFreeHeap(),
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  }
 }
 
 // --- Engine plumbing -----------------------------------------------------------
@@ -467,7 +2381,7 @@ void ReaderScene::ensureSectionOrIndex() {
   _section.reset();
   auto* s = new (std::nothrow) reader::Section(_epub, _spine, *_measure);
   if (!s) {
-    failWith(L10N("Out of memory loading chapter", "Memoria esaurita caricando il capitolo"));
+    failWith("Out of memory loading chapter");
     return;
   }
   _section.reset(s);
@@ -561,6 +2475,10 @@ void ReaderScene::maybeArmPrefetch() {
 // --- Input ----------------------------------------------------------------------
 
 void ReaderScene::handleInput(Input& in) {
+  if (_oomRestartPending && !SCENES.flushInFlight()) {
+    _oomRestartPending = false;
+    quietRestartToScene(static_cast<uint32_t>(SceneId::Reader));  // does not return
+  }
   // Deferred work: run only after its announcing frame reached glass (armed
   // by render(), flush worker idle). The silent kinds (prefetch, grid
   // metadata) yield to pending input.
@@ -584,79 +2502,199 @@ void ReaderScene::handleInput(Input& in) {
       return;
 
     case State::Reading:
-      if (in.wasPressed(Btn::Right) || in.wasPressed(Btn::Down)) {
-        pageTurn(/*forward=*/true);
-      } else if (in.wasPressed(Btn::Left) || in.wasPressed(Btn::Up)) {
-        pageTurn(/*forward=*/false);
-      } else if (in.wasPressed(Btn::Confirm)) {
-        cycleFontSize();  // "SIZE" soft key
-      } else if (in.wasPressed(Btn::Back)) {
+      if (_fbp && _fbpPosPending) {
+        // The first page never showed (no profile: memory, a bad package).
+        // A turn here would write page 1 over the saved place. BACK only.
+        if (in.wasPressed(Btn::Back)) enterBookList();
+        return;
+      }
+      if (_hlMode) {
+        handleHlInput(in);
+        return;
+      }
+      if (_wcMode) {
+        handleWordInput(in);
+        return;
+      }
+      if (_endOffer) {
+        if (!_offerFromPhone) {
+          // C4 finished screen: a two-row choice.
+          const int rows = _endOfferPath[0] ? 2 : 1;
+          if (in.wasPressed(Btn::Confirm)) {
+            if (_endSel == 1 && _endOfferPath[0]) {
+              _endOffer = false;
+              openEndOfferBook();
+            } else {
+              markFinished();
+            }
+            return;
+          }
+          if (in.wasPressed(Btn::Up) || backKey(in) || in.wasPressed(Btn::Down) || fwdKey(in)) {
+            if (rows > 1) {
+              _endSel = (_endSel + 1) % rows;
+              markDirty();
+            }
+            return;
+          }
+          if (in.wasPressed(Btn::Back)) {
+            _endOffer = false;  // back to the last page
+            markDirty();
+          }
+          return;
+        }
+        if (in.wasPressed(Btn::Confirm)) {
+          _endOffer = false;
+          _offerFromPhone = false;  // _offerGotoCid survives: the open lands there
+          openEndOfferBook();
+          return;
+        }
+        if (in.wasPressed(Btn::Back) || fwdKey(in) || backKey(in) || in.wasPressed(Btn::Up) ||
+            in.wasPressed(Btn::Down)) {
+          _endOffer = false;  // any other key: back to the last page
+          _offerFromPhone = false;
+          _offerGotoCid = 0;  // a declined phone jump must not haunt the next open
+          markDirty();
+        }
+        return;
+      }
+      if (_coverageNotice) {
+        if (in.wasPressed(Btn::Back)) {
+          _coverageNotice = false;
+          enterBookList();
+        } else if (in.wasPressed(Btn::Confirm) || fwdKey(in) || backKey(in) ||
+                   in.wasPressed(Btn::Up) || in.wasPressed(Btn::Down)) {
+          _coverageNotice = false;
+          markDirty();
+        }
+        return;
+      }
+      if (_menu != MenuView::None) {
+        handleMenuInput(in);
+        return;
+      }
+      // Long-press CONFIRM: size-cycle shortcut (the old SIZE behavior),
+      // no menu trip. Long-press = shortcut only, per the 0.7 direction.
+      if (in.wasLongPressed(Btn::Confirm)) {
+        sizeStep(+1);
+        return;
+      }
+      if (in.wasPressed(Btn::Confirm)) {
+        _menu = MenuView::Page;  // "MENU" soft key: the book's home page
+        markDirty();
+        return;
+      }
+      if (in.wasPressed(Btn::Back)) {
+        if (_noteReturn >= 0) {  // labeled RETURN: back to the mark, not the shelf
+          noteReturn();
+          return;
+        }
+        if (_fbp) _fbp.reset();  // frees the glyph cache before the grid repaints
         enterBookList();
+        return;
+      }
+      if (fwdKey(in) || in.wasPressed(Btn::Down)) {
+        if (_fbp) fbpTurn(true); else pageTurn(/*forward=*/true);
+      } else if (backKey(in) || in.wasPressed(Btn::Up)) {
+        if (_fbp) fbpTurn(false); else pageTurn(/*forward=*/false);
       }
       return;
 
     case State::BookList:
+      if (_lifeOpen) {
+        // Same RESET/ERASE two-step as the in-book READING LIFE page.
+        if (_statsResetArm) {
+          if (in.wasPressed(Btn::Confirm)) {
+            reader::ReadingStats::resetAll();
+            _statsResetArm = false;
+            markDirty();
+          } else if (in.wasPressed(Btn::Back)) {
+            _statsResetArm = false;
+            markDirty();
+          }
+          return;
+        }
+        if (in.wasPressed(Btn::Right)) {
+          _statsResetArm = true;
+          markDirty();
+          return;
+        }
+        if (in.wasPressed(Btn::Back) || in.wasPressed(Btn::Confirm)) {
+          _lifeOpen = false;
+          markDirty();
+        }
+        return;
+      }
       if (in.wasPressed(Btn::Back)) {
         if (_work == Work::GridMeta) _work = Work::None;  // don't scan behind another state
+        if (_doneView) {  // #26: BACK from the Done shelf returns to the shelf, on the Done tile
+          _doneView = false;
+          applyShelfView();
+          _sel = _liveCount;
+          _scroll = (_sel / kGridCols) * kGridCols - kGridCols * (kGridRows - 1);
+          if (_scroll < 0) _scroll = 0;
+          markDirty();
+          return;
+        }
         // Always home, even with a book open — bouncing back into the book
         // trapped the user in a book <-> list loop. Progress is saved, so
         // reopening from the grid (or the resume path in onEnter) is cheap.
         showLauncher();
         return;
       }
-      if (in.wasPressed(Btn::Confirm) && _bookCount > 0) {
-        openSelectedBook();  // overwrites any pending GridMeta — opens never wait on thumbs
-        return;
+      if (in.wasPressed(Btn::Confirm)) {
+        if (_sel < 0) {  // the stats band: your reading, from the shelf
+          if (_work == Work::GridMeta) _work = Work::None;
+          _lifeOpen = true;
+          markDirty();
+          return;
+        }
+        if (isDoneTile(_sel)) {  // #26: open the Done shelf
+          if (_work == Work::GridMeta) _work = Work::None;
+          _doneView = true;
+          applyShelfView();
+          _sel = 0;
+          _scroll = 0;
+          markDirty();
+          return;
+        }
+        if (_totalBooks > 0) {
+          openSelectedBook();  // overwrites pending GridMeta — opens never wait on thumbs
+          return;
+        }
       }
       // Grid nav: front Left/Right step one book, top Up/Down one ROW.
       if (in.wasPressed(Btn::Up)) moveSelection(-kGridCols);
       if (in.wasPressed(Btn::Down)) moveSelection(+kGridCols);
-      if (in.wasPressed(Btn::Left)) moveSelection(-1);
-      if (in.wasPressed(Btn::Right)) moveSelection(+1);
+      if (backKey(in)) moveSelection(-1);
+      if (fwdKey(in)) moveSelection(+1);
       return;
   }
 }
 
-// Invariant: ReadingStats counts a page ONLY when the page on glass actually
-// changes. Pressing forward on the last page of the last chapter (or back on
-// the very first page) is a no-op and must not inflate pages/streak, and a
-// chapter roll counts exactly once — here when the section cache loads
-// straight into Reading, or in workBuildSection() when it first has to be
-// built (nothing at all if that load fails and we end in Error).
 void ReaderScene::pageTurn(const bool forward) {
   if (!_epub || !_section) return;
-  bool sectionRoll = false;
+  reader::ReadingStats::pageTurn();
   if (forward) {
+    noteTurnPace();
     if (_section->currentPage + 1 < static_cast<int>(_section->pageCount)) {
       _section->currentPage++;
-      reader::ReadingStats::pageTurn();
       markDirty();  // full-panel: the flush worker + FAST/HALF cadence handle the rest
     } else if (_spine + 1 < _epub->getSpineItemsCount()) {
       _spine++;
       _nextPage = 0;
-      sectionRoll = true;
+      ensureSectionOrIndex();
     }
-    // else: final page of the book — stay put, nothing counted.
+    // else: final page of the book — stay put.
   } else {
     if (_section->currentPage > 0) {
       _section->currentPage--;
-      reader::ReadingStats::pageTurn();
       markDirty();
     } else if (_spine > 0) {
       _spine--;
       _nextPage = kLastPageSentinel;  // land on the previous chapter's LAST page
-      sectionRoll = true;
+      ensureSectionOrIndex();
     }
-    // else: first page of the book — stay put, nothing counted.
   }
-  if (!sectionRoll) return;
-  ensureSectionOrIndex();
-  if (_state == State::Reading) {
-    reader::ReadingStats::pageTurn();  // cache hit: the new chapter's page is the one being shown
-  } else if (_state == State::Indexing) {
-    _turnAwaitsIndex = true;  // counted by workBuildSection() once the chapter lands
-  }
-  // State::Error (OOM in ensureSectionOrIndex): no new page, no count.
 }
 
 // CONFIRM in Reading: cycle 12 -> 14 -> 16 -> 12 pt. fontId is part of the
@@ -665,8 +2703,45 @@ void ReaderScene::pageTurn(const bool forward) {
 // normal Indexing rebuild. Other chapters rebuild lazily on nav via the same
 // header-mismatch path.
 void ReaderScene::cycleFontSize() {
-  if (!_epub || !_section || !_measure) return;
-  const int nextId = (_settings.fontId + 1) % reader::kReaderFontCount;
+  setFontSize((_settings.fontId + 1) % reader::kReaderFontCount);
+}
+
+// One live size step from the MENU overlay (or the long-CONFIRM shortcut).
+// Wraps at the ends, same as the old SIZE cycle — with only three sizes a
+// wrap is one step from anywhere, and the overlay shows where you landed.
+void ReaderScene::sizeStep(const int dir) {
+  if (_fbp) {
+    // One direction-honest step, wrapping at the ends; the content-ID
+    // search keeps the position. A failed step (the target size's page
+    // buffer would not fit the heap) leaves the current size applied and
+    // the page intact — FbpBook::stepSize rolls itself back.
+    uint16_t np = _fbpPage;
+    if (!_fbp->profileSelected()) return;
+    if (!_fbp->stepSize(dir, _fbpPage, &np)) {
+      // Rollback reloads the dictionary, not the page. Render again so the
+      // visible page and its word cursors agree. A failed rollback leaves the
+      // profile unselected and renderFbp retries through its normal error path.
+      markDirty();
+      return;
+    }
+    _fbpPage = np;
+    reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp ? _fbp->pageCount() : 0);
+    streamPos();
+    Preferences prefs;
+    if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+      prefs.putUShort("fbpPx", _fbp->pxSize());
+      prefs.end();
+    }
+    markDirty();
+    return;
+  }
+  if (!_epub) return;
+  const int count = reader::kReaderFontCount;
+  setFontSize(((_settings.fontId + dir) % count + count) % count);
+}
+
+void ReaderScene::setFontSize(const int nextId) {
+  if (!_epub || !_section || !_measure || nextId == _settings.fontId) return;
   auto* m = new (std::nothrow) reader::TextMeasure(reader::readerFontFamily(nextId));
   if (m == nullptr) return;  // transient OOM: stay at the current size, keep reading
 
@@ -693,31 +2768,348 @@ void ReaderScene::cycleFontSize() {
 
 // --- Book list -------------------------------------------------------------------
 
-void ReaderScene::enterBookList() {
-  reader::ReadingStats::sessionEnd();  // flush before the grid repaints (band shows fresh numbers)
-
-  scanBooks();
-  _state = State::BookList;
-  markDirty();
+// R5: does the visible grid page hold an EPUB tile that still needs its
+// quiet-heap build (expat metadata pass + cover decode)? Packages never
+// count — their shelf assets extract as 256-byte copies, radio up
+// (measured 2026-09-01: a full sidecar shelf renders with BLE resident,
+// heap 37.9 K free, zero scratch failures).
+bool ReaderScene::shelfQuietBuildPending() const {
+  const int perPage = kGridCols * kGridRows;
+  for (int i = 0; i < perPage && _scroll + i < _totalBooks; i++) {
+    const int abs = _scroll + i;
+    if (abs < _windowOffset || abs >= _windowOffset + _bookCount) continue;
+    const BookEntry& b = _books[abs - _windowOffset];
+    if (b.meta == TileMeta::Unknown && !endsWithFbpCI(b.path)) return true;
+  }
+  return false;
 }
 
-void ReaderScene::scanBooks() {
-  _bookCount = 0;
-  _sel = 0;
-  _scroll = 0;
-  scanDir("/books");
-  scanDir("/");
+void ReaderScene::enterBookList() {
+  const uint32_t tEnter = millis();
+  reader::ReadingStats::sessionEnd();  // flush before the grid repaints (band shows fresh numbers)
+  COMPANION_BLE.clearReaderPos();  // F1: the stream ends with the BOOK, not the scene —
+                                   // the shelf must not heartbeat "still reading page N"
 
-  // Alphabetical by display name (insertion sort; <= 32 entries).
-  for (int i = 1; i < _bookCount; i++) {
-    BookEntry key = _books[i];
-    int j = i - 1;
-    while (j >= 0 && strcasecmp(baseName(_books[j].path), baseName(key.path)) > 0) {
-      _books[j + 1] = _books[j];
-      j--;
-    }
-    _books[j + 1] = key;
+  // Hand back everything the closed book held BEFORE the shelf claims its
+  // cover scratch. Leaving these mapped shredded the heap: the largest free
+  // block fell 76 bytes short of the 59 KB scratch (audit I8), so covers
+  // and even no-cover verdicts went unresolvable until a restart. Reopening
+  // from book.bin/progress.bin is a proven ~43 ms, so holding nothing costs
+  // almost nothing.
+  _section.reset();
+  _fbp.reset();
+  _noteReturn = -1;
+  _noteCachePage = 0xFFFF;
+  _wcMode = _wcSheet = false;
+  _measure.reset();
+  _epub.reset();
+  _renderer.releaseCaches();
+  InflateReader::releaseSharedDict();
+
+  _menu = MenuView::None;  // the menu never survives leaving the book
+  _menuSel = 0;
+  _orientNote = false;
+  _lifeOpen = false;
+  _statsResetArm = false;  // an armed erase never survives leaving the page
+  _pendingRestorePortrait = _landscape;  // shelf + every other scene is portrait
+  _landscape = false;
+  _pendingOrient = -1;  // a pending flip must not follow us out of the book
+  if (_sel < 0) _sel = 0;
+  _lastTurnMs = 0;     // pace gaps don't span books (the EMA itself persists)
+  const uint32_t tTornDown = millis();
+  scanBooks();
+  const uint32_t tScanned = millis();
+  // R5: the shelf pauses the radio only when it has real work to do. The
+  // scan and the package fast-pass just ran radio-up (proven safe); only a
+  // visible EPUB build claims the quiet heap + the 58 KB scratch.
+  if (shelfQuietBuildPending()) suspendRadioForBookWork();
+  _state = State::BookList;
+  markDirty();
+  // BOOKS felt slow and the flush line only ever showed the last 800 ms of
+  // it (Andrew, 2026-09-08: "it takes 1.5 seconds+"; measured end to end at
+  // 3.4 s on the X4). Name the two halves so the cost is visible.
+  // Measured on the X4 with 23 books, 2026-09-08: teardown 0 ms, scan 2597 ms,
+  // then a 774 ms draw and refresh on top — 3.4 s from the press to the
+  // shelf. Nearly all of the scan is one open-and-read-header per package,
+  // so it grows with the library. Andrew's X3 with 5 books feels fine.
+  Serial.printf("[xphone-os] reader: BOOKS teardown=%lums scan=%lums total=%lums (%d books)\n",
+                static_cast<unsigned long>(tTornDown - tEnter),
+                static_cast<unsigned long>(tScanned - tTornDown),
+                static_cast<unsigned long>(millis() - tEnter), _totalBooks);
+}
+
+namespace {
+// The shelf index: one row per compiled package, so drawing the shelf never
+// opens a book. CrossPoint's rule, and the one place we were still breaking
+// it. Keyed on (basename, size): a resynced book changes size and is read
+// again, and a book that does not is byte-identical in practice because the
+// compiler is deterministic. A missing, short or unreadable file costs
+// nothing — every book is simply opened, exactly as before.
+constexpr char kShelfIdxPath[] = "/books/.shelfidx";
+constexpr uint32_t kShelfIdxMagic = 0x58485346;  // "FSHX"
+constexpr uint16_t kShelfIdxVersion = 1;
+// A merged index keeps rows for books no scan has held lately. Cap the file so
+// a shelf churned over months cannot grow without limit. 512 rows is ~128 KB.
+constexpr uint16_t kShelfIdxMaxRows = 512;
+
+struct ShelfIdxHead {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t count;
+};
+struct ShelfIdxRow {
+  char name[128];   // basename with extension, as the directory walk saw it
+  uint32_t size;
+  char title[64];
+  char author[48];
+  uint8_t focus;
+  uint8_t hasCover;
+  uint16_t thumbW;
+  uint16_t thumbH;
+};
+
+const char* baseNameOf(const char* path) {
+  const char* slash = strrchr(path, '/');
+  return slash ? slash + 1 : path;
+}
+}  // namespace
+
+bool ReaderScene::loadShelfIndex() {
+  FsFile f = SdMan.open(kShelfIdxPath, O_RDONLY);
+  if (!f) return false;
+  ShelfIdxHead head{};
+  if (f.read(&head, sizeof(head)) != static_cast<int>(sizeof(head)) ||
+      head.magic != kShelfIdxMagic || head.version != kShelfIdxVersion) {
+    f.close();
+    return false;
   }
+  // How many entries actually need an answer. A merged index can hold rows for
+  // the whole shelf, so stop reading the moment every book in hand is resolved
+  // instead of streaming the rest of the file for nothing.
+  int wanted = 0;
+  for (int b = 0; b < _bookCount; b++)
+    if (_books[b].meta == TileMeta::Unknown && endsWithFbpCI(_books[b].path)) wanted++;
+  int filled = 0;
+  ShelfIdxRow row{};
+  for (uint16_t i = 0; i < head.count && filled < wanted; i++) {
+    if (f.read(&row, sizeof(row)) != static_cast<int>(sizeof(row))) break;  // short file: keep what we got
+    row.name[sizeof(row.name) - 1] = 0;
+    row.title[sizeof(row.title) - 1] = 0;
+    row.author[sizeof(row.author) - 1] = 0;
+    for (int b = 0; b < _bookCount; b++) {
+      BookEntry& e = _books[b];
+      if (e.meta != TileMeta::Unknown) continue;         // already resolved
+      if (e.sizeBytes != row.size) continue;
+      if (strcmp(baseNameOf(e.path), row.name) != 0) continue;
+      snprintf(e.title, sizeof(e.title), "%s", row.title);
+      snprintf(e.author, sizeof(e.author), "%s", row.author);
+      e.focusEdition = row.focus != 0;
+      e.meta = row.hasCover ? TileMeta::Cover : TileMeta::NoCover;
+      if (row.hasCover) {
+        e.thumbW = row.thumbW;
+        e.thumbH = row.thumbH;
+      }
+      if (e.title[0] == 0) prettyFileTitle(e.path, e.title, sizeof(e.title));
+      filled++;
+      break;
+    }
+  }
+  f.close();
+  if (filled) Serial.printf("[xphone-os] reader: shelf index filled %d of %d\n", filled, _bookCount);
+  return true;
+}
+
+void ReaderScene::saveShelfIndex() {
+  // Write a temp and rename, the same shape ReadingStats uses: a torn write
+  // costs the temp file, never the index. Truncating in place used to mean a
+  // failed write destroyed what we had.
+  //
+  // A windowed shelf (a library past kMaxBooks) holds only part of itself in
+  // RAM, so this MERGES: the books in hand are written fresh, then any row
+  // from the old file for a book we did not just write is carried over.
+  // Without that, a big library — the case that needs this most — would never
+  // keep an index at all.
+  //
+  // A whole-library scan does NOT merge. It sees every book, so writing only
+  // what it holds drops rows for deleted books and the file stays honest.
+  // Merging there would make the index grow for ever.
+  char tmp[sizeof(kShelfIdxPath) + 4];
+  snprintf(tmp, sizeof(tmp), "%s.t", kShelfIdxPath);
+  FsFile out = SdMan.open(tmp, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!out) return;
+  ShelfIdxHead head{kShelfIdxMagic, kShelfIdxVersion, 0};
+  if (out.write(&head, sizeof(head)) != static_cast<int>(sizeof(head))) {
+    out.close();
+    SdMan.remove(tmp);
+    return;
+  }
+  const bool wholeLibrary = (_windowOffset == 0 && _totalBooks <= kMaxBooks);
+  uint16_t written = 0;
+  bool ok = true;
+  ShelfIdxRow row{};
+
+  for (int i = 0; i < _bookCount && ok; i++) {
+    const BookEntry& e = _books[i];
+    if (!endsWithFbpCI(e.path) || e.meta == TileMeta::Unknown) continue;
+    memset(&row, 0, sizeof(row));
+    snprintf(row.name, sizeof(row.name), "%s", baseNameOf(e.path));
+    row.size = e.sizeBytes;
+    snprintf(row.title, sizeof(row.title), "%s", e.title);
+    snprintf(row.author, sizeof(row.author), "%s", e.author);
+    row.focus = e.focusEdition ? 1 : 0;
+    row.hasCover = e.meta == TileMeta::Cover ? 1 : 0;
+    row.thumbW = e.thumbW;
+    row.thumbH = e.thumbH;
+    ok = out.write(&row, sizeof(row)) == static_cast<int>(sizeof(row));
+    if (!ok) break;
+    written++;
+  }
+
+  // Carry over rows for books this pass did not write. Whole-library scans
+  // skip this on purpose, so the file drops books that are gone.
+  FsFile old = wholeLibrary ? FsFile() : SdMan.open(kShelfIdxPath, O_RDONLY);
+  if (old && ok) {
+    ShelfIdxHead oh{};
+    if (old.read(&oh, sizeof(oh)) == static_cast<int>(sizeof(oh)) && oh.magic == kShelfIdxMagic &&
+        oh.version == kShelfIdxVersion) {
+      ShelfIdxRow o{};
+      for (uint16_t i = 0; i < oh.count && ok; i++) {
+        if (old.read(&o, sizeof(o)) != static_cast<int>(sizeof(o))) break;
+        o.name[sizeof(o.name) - 1] = 0;
+        if (written >= kShelfIdxMaxRows) break;  // bound the file
+        // Skip a row this pass already wrote fresh. The test repeats the write
+        // loop's own condition, so it cannot keep a duplicate or drop a book
+        // that is present but was not parsed this time.
+        bool superseded = false;
+        for (int b = 0; b < _bookCount && !superseded; b++) {
+          const BookEntry& e = _books[b];
+          if (!endsWithFbpCI(e.path) || e.meta == TileMeta::Unknown) continue;
+          superseded = strcmp(baseNameOf(e.path), o.name) == 0;
+        }
+        if (superseded) continue;
+        ok = out.write(&o, sizeof(o)) == static_cast<int>(sizeof(o));
+        if (ok) written++;
+      }
+    }
+  }
+  if (old) old.close();
+
+  if (ok) {
+    head.count = written;
+    out.seekSet(0);
+    ok = out.write(&head, sizeof(head)) == static_cast<int>(sizeof(head));
+  }
+  out.close();
+  if (!ok) {
+    SdMan.remove(tmp);
+    return;
+  }
+  SdMan.remove(kShelfIdxPath);  // SdFat rename will not overwrite
+  if (!SdMan.rename(tmp, kShelfIdxPath)) {
+    SdMan.remove(tmp);
+    return;
+  }
+  Serial.printf("[xphone-os] reader: shelf index wrote %u rows (%s)\n", (unsigned)written,
+                wholeLibrary ? "whole shelf" : "merged window");
+}
+
+void ReaderScene::scanBooks(const int windowOffset) {
+  _bookCount = 0;
+  _totalBooks = 0;
+  _skippedNames = 0;
+  _windowOffset = windowOffset;
+  if (windowOffset == 0) {
+    _sel = 0;
+    _scroll = 0;
+  }
+  _sdOk = SdMan.ready() || SdMan.begin();
+  if (_sdOk) {
+    scanDir("/books", 0);
+    scanDir("/", 1);  // root: books allowed, no recursion into root dirs
+  }
+  if (_skippedNames)
+    Serial.printf("[xphone-os] reader: scan %d books, %u skipped (see lines above)\n", _totalBooks,
+                  static_cast<unsigned>(_skippedNames));
+
+  // Reading state first: it drives the sort and the tiles' progress line.
+  // The .pos trailer carries the pagination its page lives in, so the
+  // percent needs no header peek and survives cross-build pushes.
+  for (int i = 0; i < _bookCount; i++) {
+    BookEntry& b = _books[i];
+    b.lastReadDay = 0;
+    b.readMinutes = 0;
+    b.progressPct = 0;
+    uint32_t pages = 0, minutes = 0, lastDay = 0;
+    if (reader::ReadingStats::bookStats(b.path, &pages, &minutes, &lastDay)) {
+      b.lastReadDay = lastDay;
+      b.readMinutes = (uint16_t)(minutes > 0xFFFF ? 0xFFFF : minutes);
+    }
+    char side[192];
+    snprintf(side, sizeof(side), "%s.pos", b.path);
+    FsFile pf = SdMan.open(side, O_RDONLY);
+    if (pf) {
+      uint32_t page = 0, count = 0;
+      pf.read(&page, 4);
+      const bool hasCount = pf.read(&count, 4) == 4;
+      pf.close();
+      if (hasCount && count > 0 && page < count) {
+        uint32_t pct = (uint32_t)(((uint64_t)(page + 1) * 100) / count);
+        if (pct > 100) pct = 100;
+        if (pct == 0) pct = 1;
+        b.progressPct = (uint8_t)pct;
+      }
+    }
+  }
+
+  // Last-read first, then alphabetical (insertion sort) — only while the
+  // window IS the whole library; a paged window can't know global order, so
+  // big libraries read in card order (the app is the browsing surface
+  // there). Never-read books keep the alphabetical shelf below the ones in
+  // flight — the reading chair puts your open book on top.
+  if (_windowOffset == 0 && _totalBooks <= kMaxBooks) {
+    auto ordersBefore = [](const BookEntry& a, const BookEntry& b) -> bool {
+      if (a.lastReadDay != b.lastReadDay) return a.lastReadDay > b.lastReadDay;
+      if (a.readMinutes != b.readMinutes) return a.readMinutes > b.readMinutes;
+      return strcasecmp(baseName(a.path), baseName(b.path)) < 0;
+    };
+    for (int i = 1; i < _bookCount; i++) {
+      BookEntry key = _books[i];
+      int j = i - 1;
+      while (j >= 0 && ordersBefore(key, _books[j])) {
+        _books[j + 1] = _books[j];
+        j--;
+      }
+      _books[j + 1] = key;
+    }
+  }
+  // flowe-os#26: finished books (the .pos sidecar says the last page was
+  // reached) move to the tail, in order, and sit behind one "Done" tile.
+  // Nothing moves on the card. Reading a done book to any earlier page puts
+  // it back on the shelf at the next scan. Whole-library windows only.
+  _liveCount = _bookCount;
+  _doneCount = 0;
+  if (_windowOffset == 0 && _totalBooks <= kMaxBooks) {
+    int end = _bookCount, i = 0;
+    while (i < end) {
+      if (_books[i].progressPct >= 100) {
+        const BookEntry moved = _books[i];
+        for (int j = i; j < _bookCount - 1; j++) _books[j] = _books[j + 1];
+        _books[_bookCount - 1] = moved;
+        end--;
+      } else {
+        i++;
+      }
+    }
+    _liveCount = end;
+    _doneCount = _bookCount - end;
+  }
+  if (_doneView && _doneCount == 0) _doneView = false;  // the last done book came back
+  applyShelfView();
+
+  // Fill from the shelf index first, so the fast-pass below only opens the
+  // books the index does not already know.
+  loadShelfIndex();
+  int openedPackages = 0;
 
   // Fast-pass: tiles whose caches already exist paint complete on the FIRST
   // render. Reopening the Reader used to visibly re-upgrade every tile
@@ -726,11 +3118,60 @@ void ReaderScene::scanBooks() {
   // decode) stays Unknown for the GridMeta tick.
   for (int i = 0; i < _bookCount; i++) {
     BookEntry& b = _books[i];
+    if (endsWithFbpCI(b.path)) {
+      if (b.meta != TileMeta::Unknown) continue;  // the index already knew it
+      // Compiled package: meta comes from the FBPK header, and the shelf
+      // assets (cover thumb + shaped title strip) were pre-rendered by the
+      // phone — extract them once into CoverThumb-format sidecars.
+      bool focusEd = false;
+      xpTrace(b.path);
+      if (reader::FbpBook::readMeta(b.path, b.title, sizeof(b.title), b.author, sizeof(b.author),
+                                    &focusEd)) {
+        b.focusEdition = focusEd;
+        b.meta = TileMeta::NoCover;
+        // A package with an empty title in its header would otherwise wipe
+        // the seeded name and leave the tile blank.
+        if (b.title[0] == '\0') prettyFileTitle(b.path, b.title, sizeof(b.title));
+        bool hasCover = false, hasStrip = false;
+        xpTrace("reader: extract cover art");
+        reader::FbpBook::ensureShelfSidecars(b.path, &hasCover, &hasStrip);
+        if (hasCover) {
+          // Only the DIMS are cached; renderTile derives the sidecar path
+          // from b.path at draw time. Storing it needed path + ".cov" to
+          // fit thumbPath[64], and a long filename silently failed that
+          // test — Project Hail Mary (z-library's 66-char name) shipped a
+          // perfectly good cover the shelf never showed.
+          char cov[sizeof(b.path) + 8];
+          snprintf(cov, sizeof(cov), "%s.cov", b.path);
+          if (readThumbDims(cov, &b.thumbW, &b.thumbH)) b.meta = TileMeta::Cover;
+        }
+      }
+      // Count the open only when it taught us something. A damaged book never
+      // resolves, and counting it made every visit rewrite the whole index for
+      // no gain.
+      if (b.meta != TileMeta::Unknown) openedPackages++;
+      continue;
+    }
+    // R5: EPUB work (even a cache hit) allocates strings and vectors that
+    // THROW on a starved heap — with the radio resident the shelf has
+    // ~16 KB and the load can abort() the device (field crash 2026-09-02,
+    // 'PHM Cover Test.epub'). Leave EPUB tiles Unknown while the radio is
+    // up; shelfQuietBuildPending() then pauses it and GridMeta loads them
+    // into the quiet heap. Packages never come through here.
+    if (!_radioSuspended) continue;
     const std::unique_ptr<reader::Epub> epub(new (std::nothrow)
                                                  reader::Epub(b.path, reader::kReaderCacheRoot));
-    if (!epub || !epub->load(/*buildIfMissing=*/false)) continue;
+    if (!epub) continue;
+    // A remembered failure paints "unreadable" on the FIRST render, exactly
+    // like a remembered success paints its cover (audit I3).
+    if (SdMan.exists((epub->getCachePath() + "/meta.unreadable").c_str())) {
+      b.meta = TileMeta::NotOpened;
+      continue;
+    }
+    if (!epub->load(/*buildIfMissing=*/false)) continue;
     const std::string& title = epub->getTitle();
-    snprintf(b.title, sizeof(b.title), "%s", title.empty() ? baseName(b.path) : title.c_str());
+    if (title.empty()) prettyFileTitle(b.path, b.title, sizeof(b.title));
+    else snprintf(b.title, sizeof(b.title), "%s", title.c_str());
     snprintf(b.author, sizeof(b.author), "%s", epub->getAuthor().c_str());
     std::string thumbPath;
     const int hit = reader::CoverThumb::probe(*epub, kThumbW, kThumbH, &thumbPath);
@@ -738,13 +3179,22 @@ void ReaderScene::scanBooks() {
         readThumbDims(thumbPath.c_str(), &b.thumbW, &b.thumbH)) {
       memcpy(b.thumbPath, thumbPath.c_str(), thumbPath.size() + 1);
       b.meta = TileMeta::Cover;
+      // F6: a thumb that was already in the cache still has to be published
+      // beside the book, or a book the device has known for weeks stays a
+      // blank tile on the phone. publishCoverSidecar returns at once when
+      // the sidecar is already there.
+      publishCoverSidecar(b.path, thumbPath.c_str());
     } else if (hit == 0) {
       b.meta = TileMeta::NoCover;
     }
   }
+  // Write the index back only when this scan actually opened a package, so a
+  // shelf that was fully known costs one read and no write at all.
+  if (openedPackages > 0) saveShelfIndex();
 }
 
-void ReaderScene::scanDir(const char* dir) {
+void ReaderScene::scanDir(const char* dir, const int depth) {
+  xpTrace(depth == 0 ? "reader: scan /books" : "reader: scan subfolder");
   // Directory iteration needs SdFat's FsFile::openNext — below the ReaderFs
   // shim's surface, so use the SDK manager directly (same pattern as
   // SdUpdate.cpp; all SD access stays on the main loop task).
@@ -752,36 +3202,112 @@ void ReaderScene::scanDir(const char* dir) {
   FsFile d = SdMan.open(dir, O_RDONLY);
   if (!d || !d.isDir()) return;
 
+  const bool isRoot = (dir[0] == '/' && dir[1] == '\0');
   FsFile f;
-  while (_bookCount < kMaxBooks && f.openNext(&d, O_RDONLY)) {
-    if (!f.isDir()) {
-      char name[80];
-      if (f.getName(name, sizeof(name)) > 0 && name[0] != '.' && endsWithEpubCI(name)) {
-        BookEntry& b = _books[_bookCount];
-        // Fresh entry, meta reset to Unknown (rescan: paths may have changed;
-        // grid work reloads titles/thumbs lazily).
-        memset(&b, 0, sizeof(b));
-        const bool isRoot = (dir[0] == '/' && dir[1] == '\0');
-        const int n = snprintf(b.path, sizeof(b.path), "%s/%s", isRoot ? "" : dir, name);
-        if (n > 0 && n < static_cast<int>(sizeof(b.path))) {
-          _bookCount++;  // paths longer than the fixed buffer are skipped
-        }
+  while (f.openNext(&d, O_RDONLY)) {
+    char name[128];
+    const int len = f.getName(name, sizeof(name));
+    if (len <= 0) {
+      // SdFat returns 0 when the LFN doesn't fit the buffer AT ALL — this is
+      // the silent path that ate the 135-char bench file. Count it.
+      _skippedNames++;
+      Serial.printf("[xphone-os] reader: SKIP (name unreadable or > %u chars) in %s\n",
+                    static_cast<unsigned>(sizeof(name) - 1), dir);
+      f.close();
+      continue;
+    }
+    if (name[0] == '.') {
+      f.close();
+      continue;
+    }
+    if (len >= static_cast<int>(sizeof(name)) - 1) {
+      // Truncated: the real name overflows even the raised buffer. Count it
+      // so the empty state / serial can say WHY a book is missing instead of
+      // silently losing it (the PocketFullOfFun failure mode).
+      _skippedNames++;
+      Serial.printf("[xphone-os] reader: SKIP (name > %u chars) %.60s...\n",
+                    static_cast<unsigned>(sizeof(name) - 1), name);
+      f.close();
+      continue;
+    }
+    if (f.isDir()) {
+      // One level of nesting, /books only — Calibre-style "Author/book.epub"
+      // works; deeper trees stay the app's job to flatten on sync.
+      if (depth == 0) {
+        char sub[160];
+        const int n = snprintf(sub, sizeof(sub), "%s/%s", dir, name);
+        f.close();  // close before recursing: SdFat file handles are scarce
+        if (n > 0 && n < static_cast<int>(sizeof(sub))) scanDir(sub, depth + 1);
+      } else {
+        f.close();
+      }
+      continue;
+    }
+    // Free while the handle is still open: the shelf index is keyed on
+    // (name, size), so a book that was replaced is opened again.
+    const uint32_t entrySize = static_cast<uint32_t>(f.fileSize());
+    f.close();
+    if (!endsWithEpubCI(name) && !endsWithFbpCI(name)) continue;
+
+    char full[160];
+    const int n = snprintf(full, sizeof(full), "%s/%s", isRoot ? "" : dir, name);
+    if (n <= 0 || n >= static_cast<int>(sizeof(full))) {
+      _skippedNames++;
+      Serial.printf("[xphone-os] reader: SKIP (path > %u chars) %s/%.40s...\n",
+                    static_cast<unsigned>(sizeof(full) - 1), dir, name);
+      continue;
+    }
+
+    // A source and its package are ONE book. The card keeps both from
+    // 2026-08-20 (FileTransferServer no longer deletes the epub), so the
+    // shelf hides the epub whenever its .fbp sits beside it. It has to be
+    // this way round: the package is what the device can read quickly.
+    if (endsWithEpubCI(name)) {
+      char pkg[160];
+      snprintf(pkg, sizeof(pkg), "%s", full);
+      char* dot = strrchr(pkg, '.');
+      if (dot) {
+        snprintf(dot, sizeof(pkg) - static_cast<size_t>(dot - pkg), ".fbp");
+        if (SdMan.exists(pkg)) continue;
       }
     }
-    f.close();
+
+    const int gidx = _totalBooks;  // absolute shelf index of this match
+    _totalBooks++;
+    if (gidx >= _windowOffset && _bookCount < kMaxBooks) {
+      BookEntry& b = _books[_bookCount];
+      // Fresh entry, meta reset to Unknown (rescan: paths may have changed;
+      // grid work reloads titles/thumbs lazily).
+      memset(&b, 0, sizeof(b));
+      memcpy(b.path, full, static_cast<size_t>(n) + 1);
+      b.sizeBytes = entrySize;
+      // A placeholder tile is a tile a reader LOOKS AT. The shelf probes one
+      // book per quiet tick, and an epub with no built cache stays Unknown
+      // until it is built. Those tiles used to draw the bare filename —
+      // "zz-plain-name.epub" — which was the one place the device still said
+      // ".epub" out loud. Seed the pretty title here; metadata overwrites it.
+      prettyFileTitle(b.path, b.title, sizeof(b.title));
+      _bookCount++;
+    }
   }
   d.close();
 }
 
+// #26: _totalBooks describes the CURRENT view once the shelf is split.
+void ReaderScene::applyShelfView() {
+  if (!shelfSplit()) return;
+  _totalBooks = _doneView ? _doneCount : _liveCount + 1;
+}
+
 void ReaderScene::openSelectedBook() {
-  if (_sel < 0 || _sel >= _bookCount) return;
+  if (_sel < 0 || _sel >= _totalBooks || !inWindow(_sel)) return;
 
   // Full reopen (even for the currently open book — progress.bin preserves
   // the position, and the path is one code path).
   _section.reset();
   _epub.reset();
   _measure.reset();
-  _bookPath = _books[_sel].path;
+  _bookPath = entryAt(_sel).path;
   {
     Preferences prefs;
     if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
@@ -794,11 +3320,15 @@ void ReaderScene::openSelectedBook() {
   _hasPendingRatio = false;
   _prefetchAttemptedSpine = -1;
   _pageLoadRetries = 0;
-  _turnAwaitsIndex = false;  // this first chapter build is an open, not a page turn
   _state = State::Opening;
   _work = Work::OpenBook;  // replaces any pending GridMeta — opens never wait on thumbs
   _workArmed = false;
   markDirty();
+}
+
+bool ReaderScene::hasRealToc() const {
+  if (_fbp) return true;
+  return _epub && _epub->getTocItemsCount() > 0;
 }
 
 XpRect ReaderScene::listRect() const {
@@ -820,8 +3350,9 @@ XpRect ReaderScene::tileRect(const int visibleIndex) const {
 
 void ReaderScene::moveSelection(const int delta) {
   int sel = _sel + delta;  // row moves clamp into the ends, not off them
-  if (sel > _bookCount - 1) sel = _bookCount - 1;
-  if (sel < 0) sel = 0;
+  if (sel > _totalBooks - 1) sel = _totalBooks - 1;
+  // -1 is the stats band above the grid: UP from the first row lands on it.
+  if (sel < -1) sel = -1;
   if (sel == _sel) return;
   const int prev = _sel;
   _sel = sel;
@@ -832,6 +3363,30 @@ void ReaderScene::moveSelection(const int delta) {
   while (_sel < _scroll) _scroll -= kGridCols;
   while (_sel >= _scroll + perPage) _scroll += kGridCols;
   if (_scroll < 0) _scroll = 0;
+
+  // Window chase: if the visible page fell outside the stored window,
+  // rescan around it (keeps RAM fixed while the library is unbounded; the
+  // few-ms card walk replaces the old hard 32-book ceiling).
+  //
+  // Clamp the page to the end of the LIBRARY before comparing: the bottom
+  // page of a 9-book shelf shows books 6-8 plus an empty tile, and the
+  // unclamped `_scroll + perPage` (= 10) read that empty tile as "outside
+  // the window" (> 9), forcing a rescan. That rescan is not harmless: a
+  // windowed scan (offset > 0) stores books in raw CARD order — the sorted
+  // order only exists when the window is the whole library — so the shelf
+  // silently reshuffled and tiles changed identity on the way back up
+  // (Shawn's 9-book report, reproduced on the bench with 15).
+  const int pageEnd = _scroll + perPage < _totalBooks ? _scroll + perPage : _totalBooks;
+  if (!shelfSplit() && (_scroll < _windowOffset || pageEnd > _windowOffset + _bookCount)) {
+    const int sav_sel = _sel, sav_scroll = _scroll;
+    int base = _scroll - kGridCols * kGridRows;  // one page of back-margin
+    if (base < 0) base = 0;
+    scanBooks(base);
+    _sel = sav_sel;
+    _scroll = sav_scroll;
+    markDirty(listRect());
+    return;
+  }
   if (_scroll != oldScroll) {
     markDirty(listRect());  // tiles shifted — repaint the whole grid region
     return;
@@ -844,13 +3399,40 @@ void ReaderScene::moveSelection(const int delta) {
 // --- Render ---------------------------------------------------------------------
 
 void ReaderScene::render(Gfx& gfx) {
+  if (_pendingRestorePortrait) {
+    _pendingRestorePortrait = false;
+    gfx.setOrientation(Gfx::Orient::Portrait);
+  }
+  if (_pendingOrient >= 0) applyOrientation(gfx, _pendingOrient == 1, _pendingOrientPersist);
+  // Landscape is offered only when the package actually carries profiles for
+  // the rotated viewport (bookc --landscape). Computed HERE, not inside
+  // renderMenuPage: menuRows() decides how far the menu cursor wraps, so a
+  // flag that is only fresh after the menu has been drawn once let the cursor
+  // wrap at six rows while the page showed seven.
+  //
+  // Always ask about the LANDSCAPE profile whichever way the panel is turned.
+  // Deriving it from the live width/height meant that once you were IN
+  // landscape the question became "is there a portrait profile 44 px narrow",
+  // the answer was no, the Orientation row disappeared — and there was no way
+  // back to portrait short of leaving the book. Landscape content stops before
+  // the soft-key column, so the profile is that bit narrower than the panel.
+  {
+    const uint16_t pw = static_cast<uint16_t>(_landscape ? gfx.height() : gfx.width());
+    const uint16_t ph = static_cast<uint16_t>(_landscape ? gfx.width() : gfx.height());
+    _landscapeReady =
+        _fbp && _fbp->hasGeometry(static_cast<uint16_t>(ph - Scene::SOFTKEY_BAR_H), pw);
+  }
   _fbForLoan = gfx.display().getFrameBuffer();  // for runWork()'s dict loan
   _wCache = static_cast<int16_t>(gfx.width());
   _hCache = static_cast<int16_t>(gfx.height());
   // Text viewport from the actual panel (resolution-agnostic; part of the
   // section.bin cache key). Constant per device, so caches stay valid.
+  // Reading chrome v3 reclaimed the status strip and the tab bar: the page
+  // runs down to kReadingBottomH — roughly one more line per page. The
+  // changed height re-keys every section cache, so existing books re-index
+  // once behind the normal "Indexing..." screen.
   _settings.viewportWidth = static_cast<uint16_t>(_wCache - 2 * kMarginX);
-  _settings.viewportHeight = static_cast<uint16_t>(_hCache - kMarginTop - kStatusH - Scene::SOFTKEY_BAR_H);
+  _settings.viewportHeight = static_cast<uint16_t>(_hCache - kMarginTop - kReadingBottomH);
 
   renderBody(gfx);
 
@@ -862,46 +3444,255 @@ void ReaderScene::render(Gfx& gfx) {
 void ReaderScene::renderBody(Gfx& gfx) {
   switch (_state) {
     case State::Opening:
-      renderMessage(gfx, L10N("Opening book...", "Apro il libro..."), baseName(_bookPath.c_str()));
+      renderMessage(gfx, "Opening book...", baseName(_bookPath.c_str()));
       return;
     case State::Indexing: {
       char info[40];
-      snprintf(info, sizeof(info), L10N("chapter %d of %d", "capitolo %d di %d"), _spine + 1, _epub ? _epub->getSpineItemsCount() : 0);
-      renderMessage(gfx, L10N("Indexing chapter...", "Indicizzo il capitolo..."), info);
+      snprintf(info, sizeof(info), "section %d of %d", _spine + 1, _epub ? _epub->getSpineItemsCount() : 0);
+      renderMessage(gfx, "Indexing section...", info);
       return;
     }
     case State::Error:
-      renderMessage(gfx, L10N("Reader", "Lettura"), _errorMsg);
+      renderMessage(gfx, "Read", _errorMsg);
       return;
     case State::BookList:
       renderBookList(gfx);
       return;
     case State::Reading:
+      if (_endOffer) {
+        renderEndOffer(gfx);
+        return;
+      }
+      if (_coverageNotice) {
+        renderCoverageNotice(gfx);
+        return;
+      }
       renderReading(gfx);
       return;
   }
 }
 
+// Full-screen interstitial before the first page of a book the built-in
+// fonts mostly cannot draw. ASCII copy only — this screen must render with
+// the very fonts that just came up short.
+void ReaderScene::renderCoverageNotice(Gfx& gfx) {
+  const int cw = contentRight(gfx, 0);
+  const int textW = cw - 2 * kListMarginX;
+  int y = gfx.height() / 5;
+  gfx.drawTextCentered(kFontBold, cw / 2, y, "This book needs the app");
+  y += gfx.lineHeight(kFontBold) + 12;
+  const int lines = gfx.drawTextWrapped(
+      kFontRegular, kListMarginX, y,
+      "This device cannot draw most of the characters in this book on its own. "
+      "Sync the book with the Flowe app on your phone. The app builds a version "
+      "with full language support.",
+      textW, 8);
+  y += lines * gfx.lineHeight(kFontRegular) + 16;
+  gfx.drawTextWrapped(kFontSmall, kListMarginX, y,
+                      "READ opens it anyway. Missing characters show as boxes.", textW, 2);
+}
+
+// A3 interstitial: the last page was turned again, so the book is done.
+// Layout mirrors the coverage notice — one bold headline, then the offer.
+void ReaderScene::renderEndOffer(Gfx& gfx) {
+  const int cw = contentRight(gfx, 0);
+  const int textW = cw - 2 * kListMarginX;
+  int y = gfx.height() / 5;
+  if (!_offerFromPhone) {
+    // C4 (trimmed 2026-09-05, "extremely wordy"): four things only —
+    // Finished, the title, the time, the two rows. The keys already say
+    // BACK and GO; the author of the next book is on its own shelf card.
+    gfx.drawTextScaledCentered(kFontBold, cw / 2, y, "Finished", 2);
+    y += gfx.lineHeightScaled(kFontBold, 2) + 8;
+    if (_fbp && _fbp->title()[0]) {
+      const int lines = gfx.drawTextWrapped(kFontRegular, kListMarginX, y, _fbp->title(), textW, 2);
+      y += lines * gfx.lineHeight(kFontRegular);
+    }
+    uint32_t pages = 0, minutes = 0, lastDay = 0, firstDay = 0;
+    uint16_t days = 0;
+    if (reader::ReadingStats::bookStats(_bookPath, &pages, &minutes, &lastDay, &firstDay, &days) &&
+        minutes > 0) {
+      char line[64];
+      const unsigned h = minutes / 60, m = minutes % 60;
+      if (h > 0) snprintf(line, sizeof(line), "%u h %u min, %u day%s", h, m, days, days == 1 ? "" : "s");
+      else snprintf(line, sizeof(line), "%u min, %u day%s", m, days, days == 1 ? "" : "s");
+      y += 6;
+      gfx.drawText(kFontSmall, kListMarginX, y, line);
+      y += gfx.lineHeight(kFontSmall);
+    }
+    y += 40;
+    const int rowH = 52;
+    const int rows = _endOfferPath[0] ? 2 : 1;
+    for (int r = 0; r < rows; r++) {
+      const bool sel = r == _endSel;
+      if (sel) gfx.fillRect(kListMarginX - 8, y, textW + 16, rowH - 6, true);
+      const int textY = y + (rowH - 6 - gfx.lineHeight(kFontRegular)) / 2;
+      if (r == 0) {
+        gfx.drawText(sel ? kFontBold : kFontRegular, kListMarginX, textY, "Mark finished", !sel);
+      } else {
+        char line[128];
+        snprintf(line, sizeof(line), "Next: %s", _endOfferTitle);
+        char clipped[128];
+        truncateToWidth(gfx, sel ? kFontBold : kFontRegular, line, textW, clipped, sizeof(clipped));
+        gfx.drawText(sel ? kFontBold : kFontRegular, kListMarginX, textY, clipped, !sel);
+      }
+      y += rowH;
+    }
+    return;
+  }
+  gfx.drawTextCentered(kFontBold, cw / 2, y, "From your phone");
+  y += gfx.lineHeight(kFontBold) + 12;
+  if (_fbp && _fbp->title()[0]) {
+    char clipped[96];
+    truncateToWidth(gfx, kFontRegular, _fbp->title(), textW, clipped, sizeof(clipped));
+    gfx.drawTextCentered(kFontRegular, cw / 2, y, clipped);
+    y += gfx.lineHeight(kFontRegular);
+  }
+  y += 28;
+  gfx.drawTextCentered(kFontSmall, cw / 2, y,
+                       _offerFromPhone ? "Jump to this book?" : "Waiting longest on your card:");
+  y += gfx.lineHeight(kFontSmall) + 10;
+  // Center a title that fits one line; wrap longer ones from the margin.
+  if (gfx.textWidth(kFontBold, _endOfferTitle) <= textW) {
+    gfx.drawTextCentered(kFontBold, cw / 2, y, _endOfferTitle);
+    y += gfx.lineHeight(kFontBold) + 4;
+  } else {
+    const int lines = gfx.drawTextWrapped(kFontBold, kListMarginX, y, _endOfferTitle, textW, 3);
+    y += lines * gfx.lineHeight(kFontBold) + 4;
+  }
+  if (_endOfferAuthor[0]) {
+    char clipped[96];
+    truncateToWidth(gfx, kFontRegular, _endOfferAuthor, textW, clipped, sizeof(clipped));
+    gfx.drawTextCentered(kFontRegular, cw / 2, y, clipped);
+    y += gfx.lineHeight(kFontRegular);
+  }
+  y += 24;
+  gfx.drawTextWrapped(kFontSmall, kListMarginX, y,
+                      "READ opens it. BACK returns to the last page.", textW, 2);
+}
+
 void ReaderScene::renderMessage(Gfx& gfx, const char* line1, const char* line2) {
-  const int cx = gfx.width() / 2;
+  const int cx = contentRight(gfx, 0) / 2;
   const int cy = gfx.height() / 2;
   if (line1 && line1[0]) gfx.drawTextCentered(kFontBold, cx, cy - gfx.lineHeight(kFontBold), line1);
   if (line2 && line2[0]) {
     char clipped[96];
-    truncateToWidth(gfx, kFontRegular, line2, gfx.width() - 2 * kListMarginX, clipped, sizeof(clipped));
+    truncateToWidth(gfx, kFontRegular, line2, contentRight(gfx, 0) - 2 * kListMarginX, clipped, sizeof(clipped));
     gfx.drawTextCentered(kFontRegular, cx, cy + 6, clipped);
   }
 }
 
+// Turn the panel and re-select the package's profile for the new viewport,
+// carrying the reading position across the re-pagination by content ID (the
+// same anchor SIZE changes use). FBP only: an epub would need its section
+// caches rebuilt at the new geometry.
+//
+// Two callers with different needs, one function:
+//   - the menu row flips the current state and PERSISTS the result;
+//   - opening a book restores the persisted state and must not re-write it.
+// Returns false when the package cannot do the requested orientation, having
+// left the panel exactly as it found it.
+bool ReaderScene::applyOrientation(Gfx& gfx, const bool toLandscape, const bool persist) {
+  _pendingOrient = -1;
+  if (!_fbp) return false;
+
+  const Gfx::Orient before = gfx.orientation();
+  // Anchor only exists once a profile is live. At book-open time there is
+  // none yet — and there is nothing to carry across either, because the
+  // ".pos" page index was saved in this same orientation.
+  const bool hadProfile = _fbp->profileSelected();
+  // Sentence anchor, not paragraph: the finer counter keeps the carry
+  // near line-exact across the re-pagination (anchor split, 2026-09-01).
+  uint32_t sid = 0;
+  const bool haveAnchor = hadProfile && _fbp->pageFirstSidPublic(_fbpPage, &sid);
+
+  gfx.setOrientation(toLandscape ? Gfx::Orient::Landscape : Gfx::Orient::Portrait);
+  const uint16_t wantW = static_cast<uint16_t>(contentRight(gfx, 0));
+  const uint16_t wantH = static_cast<uint16_t>(gfx.height());
+
+  if (!hadProfile) {
+    // Check capability only. renderFbp does the real selection, because it
+    // is the one that knows the remembered text size — selecting here would
+    // silently drop the reader back to the middle size stop.
+    if (!_fbp->hasGeometry(wantW, wantH)) {
+      gfx.setOrientation(before);
+      return false;
+    }
+  } else if (!_fbp->selectProfileFresh(wantW, wantH)) {
+    gfx.setOrientation(before);
+    markDirty();  // rollback reloads the dictionary; restore the page and words
+    return false;  // package has no profile there — stay put
+  }
+
+  _landscape = toLandscape;
+  if (haveAnchor) _fbpPage = _fbp->pageForSentenceId(sid);
+  const uint16_t last = _fbp->pageCount() ? (uint16_t)(_fbp->pageCount() - 1) : 0;
+  if (hadProfile) {
+    if (_fbpPage > last) _fbpPage = last;
+    reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _fbp ? _fbp->pageCount() : 0);
+    streamPos();
+  }
+  if (persist) {
+    _wantLandscape = toLandscape;
+    Preferences prefs;
+    if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+      prefs.putUChar(kPrefsLandKey, toLandscape ? 1 : 0);
+      prefs.end();
+    }
+  }
+  // pageCount() is 0 until renderFbp selects the profile, which is the case on
+  // the restore path — print the page alone there rather than "27/0".
+  if (hadProfile)
+    Serial.printf("[xphone-os] reader: orientation -> %s (%dx%d) page %u/%u [saved]\n",
+                  _landscape ? "landscape" : "portrait", gfx.width(), gfx.height(), _fbpPage + 1,
+                  _fbp->pageCount());
+  else
+    Serial.printf("[xphone-os] reader: orientation -> %s (%dx%d) page %u [restored]\n",
+                  _landscape ? "landscape" : "portrait", gfx.width(), gfx.height(), _fbpPage + 1);
+  return true;
+}
+
 void ReaderScene::renderReading(Gfx& gfx) {
+  // Full-page menu views replace the page; strip views draw over it.
+  if (_menu == MenuView::Page) {
+    renderMenuPage(gfx);
+    return;
+  }
+  if (_menu == MenuView::Chapters) {
+    renderChapters(gfx);
+    return;
+  }
+  if (_menu == MenuView::Bookmarks) {
+    renderBookmarks(gfx);
+    return;
+  }
+  if (_menu == MenuView::Notes) {
+    renderNotes(gfx);
+    return;
+  }
+  if (_menu == MenuView::StatsBook) {
+    renderStatsBook(gfx);
+    return;
+  }
+  if (_menu == MenuView::StatsLife) {
+    if (_statsResetArm) renderStatsResetConfirm(gfx);
+    else renderStatsLife(gfx);
+    return;
+  }
+  if (_fbp) {
+    renderFbp(gfx);
+    if (_menu == MenuView::SizeStrip) renderSizeStrip(gfx);
+    else if (_menu == MenuView::GoTo) renderGoToStrip(gfx);
+    return;
+  }
   if (!_epub || !_section || !_measure) {  // defensive: should be unreachable
-    renderMessage(gfx, L10N("Reader", "Lettura"), L10N("No book open", "Nessun libro aperto"));
+    renderMessage(gfx, "Read", "No book open");
     return;
   }
 
   if (_section->pageCount == 0) {
-    renderMessage(gfx, nullptr, L10N("(empty chapter)", "(capitolo vuoto)"));
-    renderStatusLine(gfx);
+    renderMessage(gfx, nullptr, "(empty chapter)");
+    renderReadingChrome(gfx);
     saveProgress();
     return;
   }
@@ -926,12 +3717,12 @@ void ReaderScene::renderReading(Gfx& gfx) {
         _state = State::Indexing;
         _work = Work::BuildSection;
         char info[40];
-        snprintf(info, sizeof(info), L10N("chapter %d of %d", "capitolo %d di %d"), _spine + 1, _epub->getSpineItemsCount());
-        renderMessage(gfx, L10N("Indexing chapter...", "Indicizzo il capitolo..."), info);
+        snprintf(info, sizeof(info), "section %d of %d", _spine + 1, _epub->getSpineItemsCount());
+        renderMessage(gfx, "Indexing chapter...", info);
         return;
       }
-      failWith(L10N("Couldn't read this chapter", "Impossibile leggere il capitolo"));
-      renderMessage(gfx, L10N("Reader", "Lettura"), _errorMsg);
+      failWith("Couldn't read this section");
+      renderMessage(gfx, "Read", _errorMsg);
       return;
     }
     _pageLoadRetries = 0;
@@ -942,54 +3733,1135 @@ void ReaderScene::renderReading(Gfx& gfx) {
                   _section->pageCount, static_cast<unsigned long>(millis() - t0));
   }
 
-  renderStatusLine(gfx);
+  if (_menu == MenuView::None) renderReadingChrome(gfx);  // strips own that band
   saveProgress();     // crash-safe resume: 6 bytes, atomic, every page
   maybeArmPrefetch();  // silent next-chapter indexing near the chapter end
+  if (_menu == MenuView::SizeStrip) renderSizeStrip(gfx);
+  else if (_menu == MenuView::GoTo) renderGoToStrip(gfx);
 }
 
-void ReaderScene::renderStatusLine(Gfx& gfx) {
-  // "34%  ·  ch 3/12" — the ONLY reading chrome. The UI fonts are ASCII-only
-  // subsets, so the middle dot is stamped as a 3x3 square instead of U+00B7.
-  const int count = _section ? static_cast<int>(_section->pageCount) : 0;
-  const float chapterProgress = count > 0 ? static_cast<float>(_section->currentPage + 1) / count : 0.0f;
-  int pct = static_cast<int>(_epub->calculateProgress(_spine, chapterProgress) * 100.0f + 0.5f);
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
+// Shared: the current size stop (Small/Medium/Large). FBP packages carry
+// their own size family (apps compile 22/26/30, the Press 14/18/22), so
+// the stop is the RANK of the size in use among the package's sizes —
+// judging by absolute px froze the strip on "Small" for every Press book
+// (Andrew's report, 2026-09-01). Epubs report their font id directly.
+static int currentSizeStop(const reader::FbpBook* fbp, int fontId) {
+  if (fbp) {
+    const int n = fbp->sizeCount();
+    if (n <= 1) return 1;  // one size: the middle stop, arrows do nothing
+    const int stop = (fbp->sizeIndex() * 2) / (n - 1);
+    return stop > 2 ? 2 : stop;
+  }
+  return fontId < 0 ? 0 : (fontId > 2 ? 2 : fontId);
+}
 
-  char left[8];
-  char right[24];
-  snprintf(left, sizeof(left), "%d%%", pct);
-  snprintf(right, sizeof(right), L10N("ch %d/%d", "cap %d/%d"), _spine + 1, _epub->getSpineItemsCount());
+// --- MENU v2: the book's home page ---------------------------------------------
+// Full page (design B, 2026-08-16): title + author, progress bar, the
+// action list with values on the right, time-left footer.
+void ReaderScene::renderMenuPage(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
 
-  const int lineH = gfx.lineHeight(kFontSmall);
-  const int y = gfx.height() - Scene::SOFTKEY_BAR_H - kStatusH + (kStatusH - lineH) / 2;
-  constexpr int kDot = 3;
-  constexpr int kGap = 12;
-  const int wl = gfx.textWidth(kFontSmall, left);
-  const int wr = gfx.textWidth(kFontSmall, right);
-  const int total = wl + kGap + kDot + kGap + wr;
-  const int x = (gfx.width() - total) / 2;
-  gfx.drawText(kFontSmall, x, y, left);
-  gfx.fillRect(x + wl + kGap, y + lineH / 2 - kDot / 2, kDot, kDot, true);
-  gfx.drawText(kFontSmall, x + wl + kGap + kDot + kGap, y, right);
+  // Header: what book, where in it.
+  //
+  // The UI fonts are ASCII+Latin subsets, so an Arabic or Chinese title
+  // drawn as text is a row of "?" (seen on glass with kalila-wa-dimna).
+  // FBP packages ship a phone-SHAPED title strip for exactly this — the
+  // same bitmap the shelf tiles use. Prefer it; fall back to text.
+  // Title/author, from the shelf window's parsed metadata (epub) or the
+  // package header (FBP); filename only as a last resort.
+  const char* title = nullptr;
+  const char* author = "";
+  if (_fbp) {
+    title = _fbp->title();
+    author = _fbp->author();
+  } else {
+    for (int i = 0; i < _bookCount; i++) {
+      if (_bookPath == _books[i].path && _books[i].title[0]) {
+        title = _books[i].title;
+        author = _books[i].author;
+        break;
+      }
+    }
+  }
+  static char prettyTitle[96];
+  if (!title || !title[0]) {
+    prettyFileTitle(_bookPath.c_str(), prettyTitle, sizeof(prettyTitle));
+    title = prettyTitle;
+  }
+
+  char line[96];
+  int y = 24;
+  // Text is preferred — it uses the full page width and the real title.
+  // But the UI fonts are ASCII+Latin subsets, so an Arabic or Chinese
+  // title would draw as "????" (seen on glass with kalila-wa-dimna);
+  // there, fall back to the FBP package's phone-SHAPED title strip,
+  // which carries any script as a bitmap.
+  if (!gfx.canRender(kFontBold, title) && _fbp) {
+    char strip[168];
+    snprintf(strip, sizeof(strip), "%s.str", _bookPath.c_str());
+    uint16_t sw = 0, sh = 0;
+    if (readThumbDims(strip, &sw, &sh) && sw > 0 && sh > 0 && sw <= w &&
+        reader::CoverThumb::draw(gfx, strip, (w - sw) / 2, y)) {
+      y += sh + 4 + 14;
+      return renderMenuBody(gfx, y);  // strip carries title AND author
+    }
+  }
+  truncateToWidth(gfx, kFontBold, title, w - 48, line, sizeof(line));
+  gfx.drawTextCentered(kFontBold, w / 2, y, line);
+  y += gfx.lineHeight(kFontBold) + 2;
+  if (author && author[0] && gfx.canRender(kFontSmall, author)) {
+    truncateToWidth(gfx, kFontSmall, author, w - 48, line, sizeof(line));
+    gfx.drawTextCentered(kFontSmall, w / 2, y, line);
+    y += gfx.lineHeight(kFontSmall);
+  }
+  y = renderFocusChip(gfx, y);
+  y += 14;
+  renderMenuBody(gfx, y);
+}
+
+// The FOCUS chip. The shelf badges artwork with a bullseye, because a word
+// there costs a fifth of the cover; here the word stays, because the menu is
+// text anyway and has the room. Two editions of one book are identical once
+// open otherwise — you cannot tell which one you are reading, which is
+// exactly when you want to know.
+int ReaderScene::renderFocusChip(Gfx& gfx, int y) {
+  if (!_fbp || !_fbp->isFocusEdition()) return y;
+  const char* tag = "FOCUS";
+  const int cw = gfx.textWidth(kFontSmall, tag) + 16;
+  const int ch = gfx.lineHeight(kFontSmall) + 4;
+  const int cx = contentRight(gfx, 0) / 2;
+  gfx.drawRoundedRect(cx - cw / 2, y + 4, cw, ch, ch / 2, 2, true);
+  gfx.drawTextCentered(kFontSmall, cx, y + 6, tag);
+  return y + 4 + ch;
+}
+
+// Everything below the header: progress band, rows, footer. Split out so
+// the header can choose text or a shaped strip without duplicating it.
+void ReaderScene::renderMenuBody(Gfx& gfx, int y) {
+  const int w = contentRight(gfx, 0);
+  char line[96];
+
+  // Progress band: bar + one honest line.
+  const float frac = bookProgress();
+  const int barX = 60, barW = w - 120, barH = 6;
+  gfx.fillRect(barX, y, barW, barH, false);
+  gfx.drawRect(barX, y, barW, barH, 1, true);
+  gfx.fillRect(barX, y, (int)(barW * frac + 0.5f), barH, true);
+  y += barH + 10;
+  int page = 0, total = 0;
+  if (_fbp) {
+    page = _fbpPage + 1;
+    total = _fbp->pageCount();
+    snprintf(line, sizeof(line), "%d%%  -  page %d of %d", (int)(frac * 100 + 0.5f), page, total);
+  } else if (_section) {
+    page = _section->currentPage + 1;
+    total = (int)_section->pageCount;
+    snprintf(line, sizeof(line), "%d%%  -  section %d of %d", (int)(frac * 100 + 0.5f),
+             _spine + 1, _epub ? _epub->getSpineItemsCount() : 0);
+  } else {
+    line[0] = 0;
+  }
+  gfx.drawTextCentered(kFontSmall, w / 2, y, line);
+  y += gfx.lineHeight(kFontSmall) + 16;
+  gfx.drawLine(40, y, w - 40, y, 1, true);
+  y += 14;
+
+  // The action rows.
+  int chapCount = 0, chapCur = 0;
+  chapterCountAndSel(&chapCount, &chapCur);
+  MenuRow rowIds[kMenuRowCount];
+  const int rows = menuRows(_fbp != nullptr, _landscapeReady, notesHere(nullptr) > 0, rowIds);
+  static constexpr const char* kStops[3] = {"Small", "Medium", "Large"};
+  const bool markedHere = bookmarkHereIndex(nullptr);
+
+  // The rows OWN the space between the header rule and the footer rule.
+  // At a fixed 44 px they left a third of the page blank underneath, which
+  // read as a screen that had failed to finish drawing. Capped at 64 so a
+  // short list (an epub has no "Go to page") spreads without looking sparse,
+  // and the block is centred in whatever is left over.
+  const int footerRuleY = contentBottom(gfx, 0) - gfx.lineHeight(kFontSmall) - 28;
+  const int avail = footerRuleY - 12 - y;
+  int rowH = rows > 0 ? avail / rows : 44;
+  if (rowH > 64) rowH = 64;
+  // Floor is the text line plus a little, NOT a comfortable 44: the X4 turned
+  // landscape has 480 px, and seven rows at 44 came to 308 in 263 px of space.
+  // The centring below then went negative and pushed the first row up through
+  // the header rule while the footer fell off the bottom edge.
+  const int minRowH = gfx.lineHeight(kFontRegular) + 5;
+  if (rowH < minRowH) rowH = minRowH;
+  const int slack = avail - rows * rowH;
+  if (slack > 0) y += slack / 2;  // only ever centre INTO spare room
+  int hiliteH = 40;               // the selection bar stays a bar, not a slab
+  if (hiliteH > rowH - 4) hiliteH = rowH - 4;
+  for (int i = 0; i < rows; i++) {
+    const char* name = "";
+    char value[32];
+    value[0] = 0;
+    switch (rowIds[i]) {
+      case kMenuRowSize:
+        name = "Text size";
+        snprintf(value, sizeof(value), "%s", kStops[currentSizeStop(_fbp.get(), _settings.fontId)]);
+        break;
+      case kMenuRowChapters:
+        // Raw epubs list spine sections, not chapters — see renderChapters.
+        name = hasRealToc() ? "Chapters" : "Sections";
+        if (chapCount > 0)
+          snprintf(value, sizeof(value), hasRealToc() ? "ch %d of %d" : "%d of %d", chapCur + 1, chapCount);
+        else
+          snprintf(value, sizeof(value), "none");
+        break;
+      case kMenuRowNotes: {
+        const int n = notesHere(nullptr);
+        name = n == 1 ? "Footnote" : "Footnotes";
+        snprintf(value, sizeof(value), "%d", n);
+        break;
+      }
+      case kMenuRowGoTo: name = "Go to page"; break;
+      case kMenuRowBookmark:
+        name = markedHere ? "Remove bookmark" : "Bookmark this page";
+        break;
+      case kMenuRowBookmarks:
+        name = "Bookmarks";
+        if (_markCount > 0) snprintf(value, sizeof(value), "%d", _markCount);
+        else snprintf(value, sizeof(value), "none");
+        break;
+      case kMenuRowOrientation:
+        name = "Orientation";
+        if (!_landscapeReady) {
+          // SELECT on an unusable row that says nothing "just looks
+          // broken" (the same reasoning as the Bookmarks row above), so
+          // pressing it swaps the value for the thing to actually do.
+          snprintf(value, sizeof(value), "%s",
+                   _orientNote ? "Turn on in the app" : "Portrait only");
+        } else {
+          snprintf(value, sizeof(value), "%s", _landscape ? "Landscape" : "Portrait");
+        }
+        break;
+      case kMenuRowHighlight: {
+        name = "Highlight";
+        if (!_fbp || _fbp->lineCidCount() == 0) {
+          snprintf(value, sizeof(value), "%s", _hlNote ? "Sync book again" : "");
+        } else {
+          reader::Highlights::Rec recs[reader::Highlights::kMax];
+          const int hn = reader::Highlights::load(_bookPath.c_str(), recs, reader::Highlights::kMax);
+          int live = 0;
+          for (int i = 0; i < hn; i++)
+            if (!(recs[i].flags & reader::Highlights::kFlagTombstone)) live++;
+          if (live > 0) snprintf(value, sizeof(value), "%d", live);
+          else snprintf(value, sizeof(value), "none");
+        }
+        break;
+      }
+      case kMenuRowLookUp:
+        name = "Look up";
+        if (!_fbp || !_fbp->hasWordBoxes()) snprintf(value, sizeof(value), "%s", _wcNote ? "Sync book again" : "");
+        break;
+      case kMenuRowRadio:
+        // The honest label: "Off in books" says what Never costs where the
+        // choice is made, not in a manual.
+        name = "Radio while reading";
+        snprintf(value, sizeof(value), "%s", RadioPolicy::label(RadioPolicy::get()));
+        break;
+      case kMenuRowKeyLabels:
+        // "Shown"/"Hidden" describes the bar's state, the row toggles it.
+        name = "Button labels";
+        snprintf(value, sizeof(value), "%s", _readKeyBar ? "Shown" : "Hidden");
+        break;
+      case kMenuRowFooter: {
+        static constexpr const char* kFooterNames[4] = {"Off", "Page", "Percent", "Chapter time"};
+        name = "Footer";
+        snprintf(value, sizeof(value), "%s", kFooterNames[_footerMode & 3]);
+        break;
+      }
+      case kMenuRowStats: name = "Book stats"; break;
+      default: break;
+    }
+    const bool sel = i == _menuSel;
+    if (sel) gfx.fillRect(32, y + (rowH - hiliteH) / 2, w - 64, hiliteH, true);
+    const int textY = y + (rowH - gfx.lineHeight(kFontRegular)) / 2;
+    gfx.drawText(sel ? kFontBold : kFontRegular, 48, textY, name, !sel);
+    if (value[0]) {
+      const int vw = gfx.textWidth(kFontRegular, value);
+      gfx.drawText(kFontRegular, w - 48 - vw, textY, value, !sel);
+    }
+    y += rowH;
+  }
+
+  // Footer: the one most-loved stat. PINNED just above the soft-key bar
+  // rather than trailing the rows — following the list left a third of the
+  // page blank underneath, which read as an unfinished screen.
+  int footerY = footerRuleY + 14;
+  if (footerY < y + 22) footerY = y + 22;  // a very long row list wins
+  gfx.drawLine(40, footerY - 14, w - 40, footerY - 14, 1, true);
+  y = footerY;
+  int pagesLeft = total - page;
+  if (pagesLeft < 0) pagesLeft = 0;
+  // An fbp paginates the whole book; a raw epub only paginates the current
+  // SPINE section (cover, title page, chapter...), so "chapter" was a claim
+  // the engine could not back up — see renderChapters (#42).
+  const char* scope = _fbp ? "book" : "section";
+  const int mins = estimateMinutesLeft(pagesLeft);
+  if (mins > 0)
+    // Long books read as "About 2072 min left" without this — nobody
+    // thinks in thousands of minutes.
+    if (mins >= 600) snprintf(line, sizeof(line), "About %d hours left in this %s", (mins + 30) / 60, scope);
+    else if (mins >= 90) snprintf(line, sizeof(line), "About %dh %02dm left in this %s", mins / 60, mins % 60, scope);
+    else snprintf(line, sizeof(line), "About %d min left in this %s", mins, scope);
+  else if (pagesLeft > 0)
+    snprintf(line, sizeof(line), "%d page%s left in this %s", pagesLeft,
+             pagesLeft == 1 ? "" : "s", scope);
+  else
+    snprintf(line, sizeof(line), "Last page of this %s", scope);
+  gfx.drawTextCentered(kFontSmall, w / 2, y, line);
+
+}
+
+// Text size: a thin strip over the LIVE page — steps re-render the book
+// behind it, so you see exactly what you chose.
+void ReaderScene::renderSizeStrip(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);  // landscape: stop before the key column
+  // Two explanation lines need a taller panel than the three stops do.
+  const bool oneSize = _fbp && _fbp->sizeCount() <= 1;
+  const int kStripH = oneSize ? 116 : 84;  // label + stops; the soft keys say the rest
+  const int y0 = contentBottom(gfx, 0) - kStripH;
+  // A white gutter above the panel. Without it the strip's border landed
+  // through the middle of a line of the live page and sliced the glyphs in
+  // half, which reads as a drawing fault rather than as an overlay.
+  gfx.fillRect(0, y0 - 8, w, 8, false);
+  gfx.drawRoundedRect(8, y0, w - 16, kStripH - 2, 10, 2, true);
+  int y = y0 + 12;
+  gfx.drawText(kFontSmall, 26, y, "TEXT SIZE");
+  y += gfx.lineHeight(kFontSmall) + 8;
+  // A package built for another panel falls back to one size
+  // (FbpBook::selectProfile). Showing three stops that do nothing read
+  // as a broken device — Andrew chased exactly that on the X4
+  // (2026-08-23, X3-built books). Say what is true instead.
+  if (oneSize) {
+    gfx.drawText(kFontRegular, 26, y, "This copy has one text size.");
+    y += gfx.lineHeight(kFontRegular) + 2;
+    gfx.drawText(kFontRegular, 26, y, "Sync in the app to rebuild it.");
+    return;
+  }
+  const int active = currentSizeStop(_fbp.get(), _settings.fontId);
+  static constexpr const char* kStops[3] = {"Small", "Medium", "Large"};
+  int x = 26;
+  for (int i = 0; i < 3; i++) {
+    const XpFont& f = i == active ? kFontBold : kFontRegular;
+    const int tw = gfx.textWidth(f, kStops[i]);
+    if (i == active) gfx.drawRect(x - 8, y - 4, tw + 16, gfx.lineHeight(f) + 8, 1, true);
+    gfx.drawText(f, x, y, kStops[i]);
+    x += tw + 34;
+  }
+}
+
+// Go to page: live preview — the book pages underneath as you step.
+void ReaderScene::renderGoToStrip(Gfx& gfx) {
+  if (!_fbp) return;
+  const int w = contentRight(gfx, 0);  // landscape: stop before the key column
+  constexpr int kStripH = 92;
+  const int y0 = contentBottom(gfx, 0) - kStripH;
+  gfx.fillRect(0, y0 - 8, w, 8, false);  // gutter, see renderSizeStrip
+  gfx.drawRoundedRect(8, y0, w - 16, kStripH - 2, 10, 2, true);
+  int y = y0 + 10;
+  gfx.drawText(kFontSmall, 26, y, "GO TO PAGE");
+  // Two truths this line got wrong: the fonts are ASCII subsets so the "\xb1"
+  // it used to carry drew as "?", and the second pair of buttons is only on
+  // the TOP edge while the device is held portrait — turned landscape they
+  // are along a side.
+  const char* jump = _landscape ? "SIDE KEYS JUMP 10" : "TOP KEYS JUMP 10";
+  gfx.drawText(kFontSmall, w - 26 - gfx.textWidth(kFontSmall, jump), y, jump);
+  y += gfx.lineHeight(kFontSmall) + 6;
+  char line[48];
+  snprintf(line, sizeof(line), "%u  of  %u", _fbpPage + 1, _fbp->pageCount());
+  gfx.drawTextCentered(kFontBold, w / 2, y, line);
+}
+
+// Bookmarks: the places you kept, most recent last (add order).
+void ReaderScene::renderBookmarks(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
+  gfx.drawText(kFontBold, 20, 10, "Bookmarks");
+  if (_markCount > 0) {
+    char hdr[24];
+    snprintf(hdr, sizeof(hdr), "%d / %d", _markSel + 1, _markCount);
+    gfx.drawText(kFontRegular, w - 20 - gfx.textWidth(kFontRegular, hdr), 10, hdr);
+  }
+  gfx.fillRect(0, 44, w, 2, true);
+
+  if (_markCount == 0) {
+    gfx.drawTextCentered(kFontRegular, w / 2, 120, "No bookmarks in this book yet");
+    gfx.drawTextCentered(kFontSmall, w / 2, 156, "Menu > Bookmark this page keeps a place");
+  }
+
+  const int rowH = 46;
+  const int listTop = 56;
+  const int visible = (contentBottom(gfx, 0) - listTop - 30) / rowH;
+  if (_markSel < _markScroll) _markScroll = _markSel;
+  if (_markSel >= _markScroll + visible) _markScroll = _markSel - visible + 1;
+  if (_markScroll > _markCount - visible) _markScroll = _markCount - visible;
+  if (_markScroll < 0) _markScroll = 0;
+
+  char line[64];
+  for (int i = 0; i < visible && _markScroll + i < _markCount; i++) {
+    const int idx = _markScroll + i;
+    const int y = listTop + i * rowH;
+    const bool sel = idx == _markSel;
+    if (sel) gfx.fillRect(0, y, w, rowH - 4, true);
+    const int textY = y + (rowH - 4 - gfx.lineHeight(kFontRegular)) / 2;
+    char right[16];
+    right[0] = 0;
+    if (_fbp) {
+      const int total = (int)_fbp->pageCount();
+      const int pct = total > 0 ? (int)((_marks[idx].page + 1) * 100.0f / total + 0.5f) : 0;
+      snprintf(right, sizeof(right), "%d%%", pct);
+      // Name the chapter the mark sits in: "Page 268" says nothing about
+      // WHERE you were. The TOC is already in the package.
+      char chap[64];
+      chap[0] = 0;
+      const uint32_t n = _fbp->tocCount();
+      for (uint32_t t = 0; t < n; t++) {
+        uint32_t cid = 0;
+        char title[64];
+        if (!_fbp->tocEntry(t, title, sizeof(title), &cid)) break;
+        if (_fbp->pageForContentId(cid) <= _marks[idx].page) {
+          if (title[0] && gfx.canRender(kFontRegular, title)) snprintf(chap, sizeof(chap), "%s", title);
+          else chap[0] = 0;
+        } else {
+          break;
+        }
+      }
+      if (chap[0]) snprintf(line, sizeof(line), "%s  -  p%u", chap, _marks[idx].page + 1);
+      else snprintf(line, sizeof(line), "Page %u", _marks[idx].page + 1);
+    } else {
+      snprintf(line, sizeof(line), _fbp ? "Chapter %u, page %u" : "Section %u, page %u",
+               _marks[idx].spine + 1,
+               _marks[idx].page + 1);
+    }
+    char shown[64];
+    const int reserve = right[0] ? gfx.textWidth(kFontRegular, right) + 24 : 20;
+    truncateToWidth(gfx, sel ? kFontBold : kFontRegular, line, w - 40 - reserve, shown,
+                    sizeof(shown));
+    gfx.drawText(sel ? kFontBold : kFontRegular, 20, textY, shown, !sel);
+    if (right[0])
+      gfx.drawText(kFontRegular, w - 20 - gfx.textWidth(kFontRegular, right), textY, right, !sel);
+  }
+
+  if (_markCount > 0)
+    gfx.drawTextCentered(kFontSmall, w / 2, contentBottom(gfx, 0) - 26, "Hold GO to remove");
+}
+
+// Reading stats, split in two (Andrew 2026-08-16: "we're mixing overall
+// reading stats with book reading stats, they should not be crammed onto
+// the same page"). Two pages, each answering ONE question:
+//   THIS BOOK  — where am I in this book, and how long is left?
+//   READING LIFE — how is my reading going overall?
+// Every number is measured; nothing is projected or padded.
+
+// Shared: "6h 12m" / "42 min" from a minute count.
+static void formatDuration(uint32_t minutes, char* out, size_t cap) {
+  if (minutes >= 60) snprintf(out, cap, "%luh %02lum", (unsigned long)(minutes / 60),
+                              (unsigned long)(minutes % 60));
+  else snprintf(out, cap, "%lu min", (unsigned long)minutes);
+}
+
+// One label/value row over a hairline, the page's typographic workhorse.
+static int statRow(Gfx& gfx, int y, int left, int right, const char* label, const char* value,
+                   int pad = 12) {
+  gfx.fillRect(left, y, right - left, 1, true);
+  const int textY = y + pad;
+  gfx.drawText(kFontRegular, left, textY, label);
+  if (value && value[0])
+    gfx.drawText(kFontRegular, right - gfx.textWidth(kFontRegular, value), textY, value);
+  return textY + gfx.lineHeight(kFontRegular) + pad;
+}
+
+// A stats page collects its rows first and lays them out afterwards, because
+// the space underneath is a third of a page in landscape and most of one in
+// portrait. Same rows either way: what changes is the number of columns.
+struct StatRows {
+  static constexpr int kMax = 10;
+  char label[kMax][26];
+  char value[kMax][26];
+  int n = 0;
+  void add(const char* l, const char* v) {
+    if (n >= kMax || !l || !l[0]) return;
+    snprintf(label[n], sizeof(label[0]), "%s", l);
+    snprintf(value[n], sizeof(value[0]), "%s", v ? v : "");
+    n++;
+  }
+};
+
+// Draw the rows between y0 and yEnd across `left..right`, in one column if
+// they fit and two if they do not. Padding tightens before anything is
+// dropped; a row that STILL does not fit is not drawn, and the count of
+// what was left out is returned so the caller can be honest about it.
+static int drawStatRows(Gfx& gfx, const StatRows& r, int y0, int left, int right, int yEnd) {
+  if (r.n == 0) return 0;
+  const int lineH = gfx.lineHeight(kFontRegular);
+  const int avail = yEnd - y0;
+  if (avail < lineH) return r.n;
+  // Roomy padding first; tighten only if that alone would not seat the list
+  // in one column. Below 5 px the hairlines start to crowd the text.
+  int pad = 12;
+  if (r.n * (lineH + 2 * pad) > avail) {
+    pad = (avail / r.n - lineH) / 2;
+    if (pad < 5) pad = 5;
+    if (pad > 12) pad = 12;
+  }
+  const int rowH = lineH + 2 * pad;
+  int perCol = avail / rowH;
+  if (perCol < 1) perCol = 1;
+  // Columns are filled TOP-DOWN then left-to-right, so when the list is
+  // longer than the space the rows that survive are the first ones added —
+  // which is why the callers add them most-wanted first.
+  int cols = (r.n + perCol - 1) / perCol;
+  if (cols > 2) cols = 2;  // three columns of label+value do not read
+  if (cols < 1) cols = 1;
+  if (cols == 1 && perCol > r.n) perCol = r.n;
+  const int gap = 28;
+  const int colW = (right - left - (cols - 1) * gap) / cols;
+  int drawn = 0;
+  for (int c = 0; c < cols; c++) {
+    const int cl = left + c * (colW + gap);
+    int y = y0;
+    for (int i = c * perCol; i < r.n && i < (c + 1) * perCol; i++) {
+      y = statRow(gfx, y, cl, cl + colW, r.label[i], r.value[i], pad);
+      drawn++;
+    }
+    gfx.fillRect(cl, y, colW, 1, true);  // close the column
+  }
+  return r.n - drawn;  // how many did not fit
+}
+
+void ReaderScene::renderStatsBook(Gfx& gfx) {
+  const int w = gfx.width();
+  const int left = 24, right = contentRight(gfx, 24);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
+  char line[96];
+
+  gfx.drawText(kFontSmall, left, 14, "THIS BOOK");
+  gfx.fillRect(left, 40, right - left, 2, true);
+
+  // Cover, at its natural size; the text column sits beside it.
+  const int coverY = 60;
+  int coverW = 0, coverH = 0;
+  bool drewCover = false;
+  {
+    char cov[168];
+    uint16_t cw = 0, ch = 0;
+    cov[0] = 0;
+    if (_fbp) snprintf(cov, sizeof(cov), "%s.cov", _bookPath.c_str());
+    if (!cov[0] || !readThumbDims(cov, &cw, &ch)) {
+      for (int i = 0; i < _bookCount; i++) {
+        if (_bookPath == _books[i].path && _books[i].thumbPath[0]) {
+          snprintf(cov, sizeof(cov), "%s", _books[i].thumbPath);
+          cw = _books[i].thumbW;
+          ch = _books[i].thumbH;
+          break;
+        }
+      }
+    }
+    if (cw > 0 && ch > 0) {
+      coverW = cw;
+      coverH = ch;
+      drewCover = reader::CoverThumb::draw(gfx, cov, left, coverY);
+    }
+  }
+  if (!drewCover) {
+    coverW = 150;
+    coverH = 200;
+    gfx.drawTextCentered(kFontSmall, left + coverW / 2, coverY + coverH / 2 - 8, "no cover");
+  }
+  gfx.drawRect(left, coverY, coverW, coverH, 2, true);
+
+  // Title / author / the one number that matters.
+  const int bx = left + coverW + 22;
+  int by = coverY;
+  const char* title = _fbp ? _fbp->title() : nullptr;
+  const char* author = _fbp ? _fbp->author() : "";
+  if (!title) {
+    for (int i = 0; i < _bookCount; i++) {
+      if (_bookPath == _books[i].path && _books[i].title[0]) {
+        title = _books[i].title;
+        author = _books[i].author;
+        break;
+      }
+    }
+  }
+  static char prettyTitle[96];
+  if (!title || !title[0]) {
+    prettyFileTitle(_bookPath.c_str(), prettyTitle, sizeof(prettyTitle));
+    title = prettyTitle;
+  }
+  if (gfx.canRender(kFontBold, title)) {
+    // drawTextWrapped returns the LINE COUNT, not a y — advance by hand.
+    const int titleLines = gfx.drawTextWrapped(kFontBold, bx, by, title, right - bx, 2);
+    by += (titleLines > 0 ? titleLines : 1) * gfx.lineHeight(kFontBold) + 4;
+    if (author && author[0] && gfx.canRender(kFontSmall, author)) {
+      truncateToWidth(gfx, kFontSmall, author, right - bx, line, sizeof(line));
+      gfx.drawText(kFontSmall, bx, by, line);
+      by += gfx.lineHeight(kFontSmall);
+    }
+  } else {
+    char strip[168];
+    snprintf(strip, sizeof(strip), "%s.str", _bookPath.c_str());
+    uint16_t sw = 0, sh = 0;
+    if (_fbp && readThumbDims(strip, &sw, &sh) && sw > 0 && sw <= right - bx &&
+        reader::CoverThumb::draw(gfx, strip, bx, by))
+      by += sh;
+  }
+
+  uint32_t bookPages = 0, bookMinutes = 0, lastDay = 0, firstDay = 0;
+  uint16_t daysRead = 0;
+  reader::ReadingStats::bookStats(_bookPath, &bookPages, &bookMinutes, &lastDay, &firstDay,
+                                  &daysRead);
+  const float frac = bookProgress();
+  int page = 0, total = 0;
+  if (_fbp) {
+    total = static_cast<int>(_fbp->pageCount());
+    page = _fbpPage + 1;
+  } else if (_section) {
+    total = static_cast<int>(_section->pageCount);
+    page = _section->currentPage + 1;
+  }
+  int pagesLeft = total - page;
+  if (pagesLeft < 0) pagesLeft = 0;
+  const int mins = estimateMinutesLeft(pagesLeft);
+
+  by += 18;
+  if (mins > 0) {
+    formatDuration(static_cast<uint32_t>(mins), line, sizeof(line));
+    gfx.drawTextScaled(kFontBold, bx, by, line, 2);
+    by += gfx.lineHeightScaled(kFontBold, 2) + 2;
+    gfx.drawText(kFontSmall, bx, by, paceKnown() ? "LEFT AT YOUR PACE" : "LEFT AT A TYPICAL PACE");
+  } else {
+    snprintf(line, sizeof(line), "%d", pagesLeft);
+    gfx.drawTextScaled(kFontBold, bx, by, line, 2);
+    by += gfx.lineHeightScaled(kFontBold, 2) + 2;
+    // EPUBs count pages per CHAPTER. Unlabeled, "0 PAGES LEFT" beside a 0%
+    // progress bar read as a contradiction (pedantic walk, 2026-08-17).
+    if (_fbp) gfx.drawText(kFontSmall, bx, by, pagesLeft == 1 ? "PAGE LEFT" : "PAGES LEFT");
+    else gfx.drawText(kFontSmall, bx, by, "LEFT IN CHAPTER");
+  }
+  by += gfx.lineHeight(kFontSmall);
+  if (_fbp) {
+    int inChapter = 0;
+    const int left = chapterPagesLeft(&inChapter);
+    if (left >= 0 && inChapter > 0) {
+      by += 8;
+      const int cm = estimateMinutesLeft(left);
+      if (left == 0) snprintf(line, sizeof(line), "Last page of this chapter");
+      else snprintf(line, sizeof(line), "%d of %d pages left in this chapter, about %d min", left, inChapter, cm);
+      gfx.drawText(kFontSmall, bx, by, line);
+      by += gfx.lineHeight(kFontSmall);
+    }
+  }
+
+  // Progress spans the full width under both columns.
+  int y = (by > coverY + coverH ? by : coverY + coverH) + 26;
+  gfx.drawRect(left, y, right - left, 18, 2, true);
+  gfx.fillRect(left, y, static_cast<int>((right - left) * frac + 0.5f), 18, true);
+  y += 18 + 10;
+  snprintf(line, sizeof(line), _fbp ? "%d%% through  -  page %d of %d"
+                                    : "%d%% through  -  page %d of %d in this section",
+           static_cast<int>(frac * 100 + 0.5f), page, total);
+  gfx.drawText(kFontSmall, left, y, line);
+  y += gfx.lineHeight(kFontSmall) + 22;
+
+  // The book's own numbers — collected most-wanted first, then laid out to
+  // whatever room this orientation left underneath.
+  StatRows rows;
+  char v[32];
+  formatDuration(bookMinutes, line, sizeof(line));
+  rows.add("Time with this book", line);
+  snprintf(v, sizeof(v), "%lu", (unsigned long)bookPages);
+  rows.add("Pages you have read", v);
+  if (_avgTurnMs > 0) {
+    const uint32_t sec = _avgTurnMs / 1000;
+    if (sec >= 60) snprintf(v, sizeof(v), "%lum %02lus a page", (unsigned long)(sec / 60),
+                            (unsigned long)(sec % 60));
+    else snprintf(v, sizeof(v), "%lus a page", (unsigned long)sec);
+    rows.add("Your pace", v);
+  }
+  int chapCount = 0, chapCur = 0;
+  chapterCountAndSel(&chapCount, &chapCur);
+  if (chapCount > 0) {
+    snprintf(v, sizeof(v), "%d of %d", chapCur + 1, chapCount);
+    rows.add("Chapter", v);
+  }
+  if (daysRead > 0) {
+    snprintf(v, sizeof(v), daysRead == 1 ? "%u day" : "%u days", daysRead);
+    rows.add("Days with this book", v);
+  }
+  static constexpr const char* kMon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  const uint32_t today = reader::ReadingStats::todayYmdPublic();
+  if (firstDay > 0) {
+    const int mo = static_cast<int>((firstDay / 100u) % 100u);
+    if (mo >= 1 && mo <= 12)
+      snprintf(v, sizeof(v), "%s %lu", kMon[mo - 1], (unsigned long)(firstDay % 100u));
+    else
+      v[0] = 0;
+    if (v[0]) rows.add("Started", v);
+  }
+  if (lastDay > 0) {
+    if (lastDay == today) {
+      snprintf(v, sizeof(v), "today");
+    } else {
+      const int mo = static_cast<int>((lastDay / 100u) % 100u);
+      if (mo >= 1 && mo <= 12)
+        snprintf(v, sizeof(v), "%s %lu", kMon[mo - 1], (unsigned long)(lastDay % 100u));
+      else
+        v[0] = 0;
+    }
+    if (v[0]) rows.add("Last read", v);
+  }
+  // Landscape has no bottom key bar — the column is on the right — so the
+  // rows own the panel all the way down there, and only portrait reserves it.
+  const int yEnd = contentBottom(gfx, 0);
+  const int dropped = drawStatRows(gfx, rows, y, left, right, yEnd);
+  if (dropped > 0) Serial.printf("[xphone-os] stats: %d book rows did not fit\n", dropped);
+}
+
+void ReaderScene::renderStatsLife(Gfx& gfx) {
+  const int w = gfx.width();
+  const int left = 24, right = contentRight(gfx, 24);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
+  char line[96];
+
+  const reader::ReadingStats::Band b = reader::ReadingStats::band();
+  const reader::ReadingStats::Summary sum = reader::ReadingStats::summary();
+
+  gfx.drawText(kFontSmall, left, 14, "READING LIFE");
+  if (b.clockValid) {
+    static constexpr const char* kMonths[12] = {"JANUARY",   "FEBRUARY", "MARCH",    "APRIL",
+                                                "MAY",       "JUNE",     "JULY",     "AUGUST",
+                                                "SEPTEMBER", "OCTOBER",  "NOVEMBER", "DECEMBER"};
+    const uint32_t today = reader::ReadingStats::todayYmdPublic();
+    const int mo = static_cast<int>((today / 100u) % 100u);
+    if (mo >= 1 && mo <= 12) {
+      snprintf(line, sizeof(line), "%s %lu", kMonths[mo - 1], (unsigned long)(today / 10000u));
+      gfx.drawText(kFontSmall, right - gfx.textWidth(kFontSmall, line), 14, line);
+    }
+  } else {
+    // No clock since boot: a small pill, the same affordance Notifications
+    // uses — not two lines of meta text eating the top of the page.
+    const char* label = "NEEDS SYNC";
+    const int capMid = 14 + gfx.capTopOffset(kFontSmall) + gfx.capHeight(kFontSmall) / 2;
+    const int pillW = gfx.textWidth(kFontSmall, label) + 22;
+    const int pillH = gfx.capHeight(kFontSmall) + 12;
+    const int pillX = right - pillW;
+    gfx.drawRoundedRect(pillX, capMid - pillH / 2, pillW, pillH, pillH / 2, 1, true);
+    gfx.drawTextCentered(kFontSmall, pillX + pillW / 2,
+                         capMid - gfx.capHeight(kFontSmall) / 2 - gfx.capTopOffset(kFontSmall),
+                         label, true);
+  }
+  gfx.fillRect(left, 40, right - left, 2, true);
+
+  // Nothing recorded at all (first run, or right after RESET): an
+  // invitation, not a wall of zeros. Checked BEFORE the hero — with a
+  // synced clock the fall-through hero is a giant "0 books this year"
+  // over an empty month strip, exactly the scold the hero logic exists
+  // to avoid. Seen on glass right after the #44 erase.
+  if (sum.lifetimePages == 0 && sum.lifetimeMinutes == 0) {
+    const int midY = (contentBottom(gfx, 0)) / 2 - 40;
+    gfx.drawTextCentered(kFontBold, w / 2, midY, "Nothing to show yet");
+    gfx.drawTextCentered(kFontSmall, w / 2, midY + gfx.lineHeight(kFontBold) + 10,
+                         "Read a few pages and your streak,");
+    gfx.drawTextCentered(kFontSmall, w / 2,
+                         midY + gfx.lineHeight(kFontBold) + 10 + gfx.lineHeight(kFontSmall) + 4,
+                         "your week and your totals appear here.");
+    gfx.drawTextCentered(kFontSmall, w / 2, contentBottom(gfx, 0) - 24,
+                         _lifeOpen ? "BACK returns to your books" : "BACK returns to the menu");
+    return;
+  }
+
+  int y = 62;
+  bool heroIsBooks = false;
+  if (b.clockValid) {
+    // Never lead with a giant "0" — it is the loudest mark on the page and
+    // it would be a scold. Show whatever is true and encouraging.
+    char heroNum[24];
+    const char* heroLabel;
+    char heroSub[48];
+    heroSub[0] = 0;
+    const uint16_t todayMin = reader::ReadingStats::todayMinutes();
+    if (b.streakDays > 0) {
+      snprintf(heroNum, sizeof(heroNum), "%u", b.streakDays);
+      heroLabel = b.streakDays == 1 ? "day in a row" : "days in a row";
+      if (sum.longestStreak > 0)
+        snprintf(heroSub, sizeof(heroSub), sum.longestStreak == 1 ? "BEST EVER %u DAY"
+                                                                  : "BEST EVER %u DAYS",
+                 sum.longestStreak);
+    } else if (todayMin > 0 || b.todayPages > 0) {
+      snprintf(heroNum, sizeof(heroNum), "%u", todayMin > 0 ? todayMin : b.todayPages);
+      heroLabel = todayMin > 0 ? "minutes today" : "pages today";
+      snprintf(heroSub, sizeof(heroSub), "%s",
+               sum.longestStreak > 0 ? "READING AGAIN TODAY" : "YOUR FIRST DAY");
+    } else {
+      snprintf(heroNum, sizeof(heroNum), "%u", sum.booksThisYear);
+      heroLabel = sum.booksThisYear == 1 ? "book this year" : "books this year";
+      heroIsBooks = true;
+      if (sum.longestStreak > 0)
+        snprintf(heroSub, sizeof(heroSub), sum.longestStreak == 1 ? "BEST STREAK %u DAY"
+                                                                  : "BEST STREAK %u DAYS",
+                 sum.longestStreak);
+    }
+    gfx.drawTextScaled(kFontBold, left, y, heroNum, 3);
+    const int textX = left + gfx.textWidthScaled(kFontBold, heroNum, 3) + 22;
+    gfx.drawText(kFontRegular, textX, y + 14, heroLabel);
+    if (heroSub[0]) gfx.drawText(kFontSmall, textX, y + 50, heroSub);
+    y += gfx.lineHeightScaled(kFontBold, 3) + 14;
+
+    // The month, two-state: filled = read, hollow = not. Magnitude by AREA,
+    // never by shade — a 1-bit panel has no grays to grade with.
+    const int days = sum.monthDays ? sum.monthDays : 31;
+    int gap = 4;
+    int cell = (right - left - (days - 1) * gap) / days;
+    if (cell > 14) cell = 14;
+    if (cell < 4) {  // narrow panel: give the gap back before the cell
+      cell = 4;
+      gap = 3;
+    }
+    // Centre the strip on whatever it actually measures, so it can never
+    // run a cell past the right margin.
+    const int stripW = days * cell + (days - 1) * gap;
+    int sx = left + ((right - left) - stripW) / 2;
+    if (sx < left) sx = left;
+    for (int d = 0; d < days; d++) {
+      if (sum.monthMask & (1u << d)) gfx.fillRect(sx, y, cell, cell, true);
+      else gfx.drawRect(sx, y, cell, cell, 2, true);
+      sx += cell + gap;
+    }
+    y += cell + 12;
+    snprintf(line, sizeof(line), "%u of %u days this month", sum.monthRead, days);
+    gfx.drawText(kFontSmall, left, y, line);
+    y += gfx.lineHeight(kFontSmall) + 24;
+  }
+
+  // One chart: the week, scaled to its own peak day (KOReader's rule).
+  // With no date the bars would be seven empty boxes — a scaffold with no
+  // data in it — so the chart only appears when it can say something.
+  if (b.clockValid) {
+    gfx.fillRect(left, y, right - left, 2, true);
+    y += 14;
+    // Every number on this line carries its own scope word. It used to read
+    // "PAGES THIS WEEK ... 16 pages - 62 MIN TODAY", where "16" could have
+    // been either.
+    gfx.drawText(kFontSmall, left, y, "THIS WEEK");
+    uint32_t weekPages = 0;
+    for (int i = 0; i < 7; i++) weekPages += b.weekPages[i];
+    const uint16_t todayMin = reader::ReadingStats::todayMinutes();
+    if (todayMin > 0)
+      snprintf(line, sizeof(line), "%lu PAGES  -  %u MIN TODAY", (unsigned long)weekPages, todayMin);
+    else
+      snprintf(line, sizeof(line), "%lu PAGES", (unsigned long)weekPages);
+    gfx.drawText(kFontSmall, right - gfx.textWidth(kFontSmall, line), y, line);
+    y += gfx.lineHeight(kFontSmall) + 12;
+
+    // Fill the page: the chart takes whatever the totals block does not.
+    const int totalsBlock = gfx.lineHeightScaled(kFontBold, 2) + gfx.lineHeight(kFontSmall) * 2 +
+                            40 + 16;
+    const int labelsH = gfx.lineHeight(kFontSmall) + 8 + 24;
+    int chartH = (contentBottom(gfx, 0) - 34) - y - labelsH - totalsBlock;
+    if (chartH > 240) chartH = 240;
+    if (chartH < 70) chartH = 70;
+    uint16_t peak = 1;
+    for (int i = 0; i < 7; i++)
+      if (b.weekPages[i] > peak) peak = b.weekPages[i];
+    const int slot = (right - left) / 7;
+    const int barWidth = slot - 10;
+    static constexpr const char* kDayLetters[7] = {"M", "T", "W", "T", "F", "S", "S"};
+    // Bars rise from ONE baseline. Each day used to get a full-height hollow
+    // box, so a week with a single reading day showed six empty gauges — a
+    // scaffold that looked like six zeros deliberately drawn at full size.
+    gfx.fillRect(left, y + chartH, right - left, 2, true);
+    for (int i = 0; i < 7; i++) {
+      const int x = left + i * slot;
+      const int h = static_cast<int>(b.weekPages[i] * (float)chartH / peak + 0.5f);
+      if (h > 0) gfx.fillRect(x, y + chartH - h, barWidth, h, true);
+      else gfx.fillRect(x, y + chartH - 3, barWidth, 3, true);  // a day with nothing still counts
+      // Direct-label the bar. A chart with no axis and no numbers only says
+      // "one day was bigger"; the number says which day and by how much.
+      if (b.weekPages[i] > 0) {
+        char n[8];
+        snprintf(n, sizeof(n), "%u", b.weekPages[i]);
+        const int lh = gfx.lineHeight(kFontSmall);
+        const bool inside = h > lh + 8;  // tall enough to hold its own label
+        gfx.drawTextCentered(kFontSmall, x + barWidth / 2,
+                             inside ? y + chartH - h + 4 : y + chartH - h - lh - 2, n, !inside);
+      }
+      const int weekday = (b.todayWeekday + 7 - (6 - i)) % 7;
+      gfx.drawTextCentered(kFontSmall, x + barWidth / 2, y + chartH + 8, kDayLetters[weekday]);
+    }
+    y += chartH + 8 + gfx.lineHeight(kFontSmall) + 24;
+  }
+
+  // Without a date the calendar, the streak and the week chart all have
+  // nothing to stand on, and two lonely numbers in the middle of the panel
+  // read as a screen that failed to draw. Show the four totals that need no
+  // clock at all, as a 2x2 of heroes that fills the page honestly.
+  if (!b.clockValid) {
+    // Exactly three things are true without a date — every other number on
+    // this page is a per-DAY record and would be a giant honest zero, which
+    // is the loudest mark on a 1-bit panel and reads as a scold. Three big
+    // tiles under one heading, centred, is the whole page.
+
+    const int headH = gfx.lineHeight(kFontSmall) + 18;
+    const int tileH = gfx.lineHeightScaled(kFontBold, 3) + gfx.lineHeight(kFontSmall) + 6;
+    const int spaceTop = y;
+    const int spaceBottom = contentBottom(gfx, 0) - 20;
+    int ty = spaceTop + (spaceBottom - spaceTop - headH - tileH) / 2;
+    if (ty < spaceTop) ty = spaceTop;
+    gfx.drawText(kFontSmall, left, ty, "ALL TIME");
+    ty += headH;
+    const int colW = (right - left) / 3;
+    const char* labels[3];
+    char nums[3][24];
+    snprintf(nums[0], sizeof(nums[0]), "%lu", (unsigned long)sum.lifetimePages);
+    labels[0] = "PAGES";
+    if (sum.lifetimeMinutes >= 60)
+      snprintf(nums[1], sizeof(nums[1]), "%luh", (unsigned long)(sum.lifetimeMinutes / 60));
+    else
+      snprintf(nums[1], sizeof(nums[1]), "%lum", (unsigned long)sum.lifetimeMinutes);
+    labels[1] = "READING";
+    snprintf(nums[2], sizeof(nums[2]), "%u", sum.booksAllTime);
+    labels[2] = sum.booksAllTime == 1 ? "BOOK" : "BOOKS";
+    // Drop a step rather than let a wide number run into its neighbour: on
+    // the narrower panel a three-digit page count at scale 3 already touches
+    // the next column.
+    int scale = 3;
+    while (scale > 1) {
+      int widest = 0;
+      for (int i = 0; i < 3; i++) {
+        const int tw = gfx.textWidthScaled(kFontBold, nums[i], scale);
+        if (tw > widest) widest = tw;
+      }
+      if (widest <= colW - 14) break;
+      scale--;
+    }
+    for (int i = 0; i < 3; i++) {
+      const int tx = left + i * colW;
+      gfx.drawTextScaled(kFontBold, tx, ty, nums[i], scale);
+      gfx.drawText(kFontSmall, tx, ty + gfx.lineHeightScaled(kFontBold, scale) + 6, labels[i]);
+    }
+
+    return;
+  }
+  {
+    gfx.fillRect(left, y, right - left, 2, true);
+    y += 16;
+  }
+  const int col2 = left + (right - left) / 2;
+  const bool pagesInTile = heroIsBooks;  // the no-clock page returned above
+  if (pagesInTile) {
+    snprintf(line, sizeof(line), "%lu", (unsigned long)sum.lifetimePages);
+    gfx.drawTextScaled(kFontBold, left, y, line, 2);
+    gfx.drawText(kFontSmall, left, y + gfx.lineHeightScaled(kFontBold, 2) + 4, "PAGES ALL TIME");
+  } else {
+    snprintf(line, sizeof(line), "%u", sum.booksThisYear);
+    gfx.drawTextScaled(kFontBold, left, y, line, 2);
+    gfx.drawText(kFontSmall, left, y + gfx.lineHeightScaled(kFontBold, 2) + 4, "BOOKS THIS YEAR");
+  }
+  if (sum.lifetimeMinutes >= 60)
+    snprintf(line, sizeof(line), "%luh", (unsigned long)(sum.lifetimeMinutes / 60));
+  else
+    snprintf(line, sizeof(line), "%lum", (unsigned long)sum.lifetimeMinutes);
+  gfx.drawTextScaled(kFontBold, col2, y, line, 2);
+  gfx.drawText(kFontSmall, col2, y + gfx.lineHeightScaled(kFontBold, 2) + 4, "READING ALL TIME");
+  y += gfx.lineHeightScaled(kFontBold, 2) + gfx.lineHeight(kFontSmall) + 20;
+
+  char best[40];
+  if (sum.bestDayMinutes >= 60)
+    snprintf(best, sizeof(best), "Best day %uh %02um", sum.bestDayMinutes / 60,
+             sum.bestDayMinutes % 60);
+  else if (sum.bestDayMinutes > 0)
+    snprintf(best, sizeof(best), "Best day %u min", sum.bestDayMinutes);
+  else
+    best[0] = 0;
+  if (best[0] && !pagesInTile)
+    snprintf(line, sizeof(line), "%s  -  %lu pages all time", best,
+             (unsigned long)sum.lifetimePages);
+  else if (best[0])
+    snprintf(line, sizeof(line), "%s", best);
+  else if (!pagesInTile)
+    snprintf(line, sizeof(line), "%lu pages all time", (unsigned long)sum.lifetimePages);
+  else
+    line[0] = 0;
+  if (line[0]) gfx.drawText(kFontSmall, left, y, line);
+
+}
+
+// Chapters: a full page of its own (the one list that can be long).
+void ReaderScene::renderChapters(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  gfx.fillRect(0, 0, w, gfx.height(), false);
+  int count = 0, cur = 0;
+  chapterCountAndSel(&count, &cur);
+
+  gfx.drawText(kFontBold, 20, 10, hasRealToc() ? "Chapters" : "Sections");
+  char hdr[24];
+  snprintf(hdr, sizeof(hdr), "%d / %d", _tocSel + 1, count > 0 ? count : 1);
+  gfx.drawText(kFontRegular, w - 20 - gfx.textWidth(kFontRegular, hdr), 10, hdr);
+  gfx.fillRect(0, 44, w, 2, true);
+
+  const int rowH = 46;
+  const int listTop = 56;
+  const int visible = (contentBottom(gfx, 0) - listTop - 30) / rowH;
+  if (_tocSel < _tocScroll) _tocScroll = _tocSel;
+  if (_tocSel >= _tocScroll + visible) _tocScroll = _tocSel - visible + 1;
+  // Clamp DOWN as well. The window only ever grew before, so a scroll set
+  // while the list was long (or the panel turned) stuck there — the first
+  // chapter simply could not be reached again.
+  if (_tocScroll > count - visible) _tocScroll = count - visible;
+  if (_tocScroll < 0) _tocScroll = 0;
+
+  char title[64];
+  char shown[64];
+  for (int i = 0; i < visible && _tocScroll + i < count; i++) {
+    const int idx = _tocScroll + i;
+    const int y = listTop + i * rowH;
+    if (_fbp) {
+      if (!_fbp->tocEntry((uint32_t)idx, title, sizeof(title), nullptr)) continue;
+      if (!title[0]) snprintf(title, sizeof(title), "Chapter %d", idx + 1);
+    } else if (_epub && _epub->getTocItemsCount() > 0) {
+      // The book's own chapter names, as every other reader shows them.
+      const auto entry = _epub->getTocItem(idx);
+      snprintf(title, sizeof(title), "%s", entry.title.c_str());
+      if (!title[0]) snprintf(title, sizeof(title), "Chapter %d", idx + 1);
+    } else {
+      // No TOC in the book: these rows are SPINE entries — cover, title page
+      // and copyright all count — so numbering them "Chapter N" would repeat
+      // the bug in #42. Name them for what they are.
+      snprintf(title, sizeof(title), "Section %d", idx + 1);
+    }
+    const bool sel = idx == _tocSel;
+    if (sel) gfx.fillRect(0, y, w, rowH - 4, true);
+    const int textY = y + (rowH - 4 - gfx.lineHeight(kFontRegular)) / 2;
+    // The reader's current chapter gets a quiet marker. A bare "<" used to
+    // sit here; now that arrows are the button language it read as a stray
+    // key mark. A word cannot be mistaken for one.
+    truncateToWidth(gfx, sel ? kFontBold : kFontRegular, title, w - 96, shown, sizeof(shown));
+    gfx.drawText(sel ? kFontBold : kFontRegular, 20, textY, shown, !sel);
+    if (idx == cur) {
+      const int nw = gfx.textWidth(kFontSmall, "NOW");
+      gfx.drawText(kFontSmall, w - 24 - nw, textY + 3, "NOW", !sel);
+    }
+  }
+
+}
+
+// flowe-os#44: the full page between RESET and an empty store. A destructive
+// act deserves its own page saying exactly what it erases and what it spares;
+// the soft keys under it read only BACK and ERASE.
+void ReaderScene::renderStatsResetConfirm(Gfx& gfx) {
+  const int w = contentRight(gfx, 0);
+  gfx.fillRect(0, 0, gfx.width(), gfx.height(), false);
+  const int lh = gfx.lineHeight(kFontSmall);
+  int y = contentBottom(gfx, 0) / 2 - gfx.lineHeight(kFontBold) - 2 * lh - 20;
+  if (y < 40) y = 40;
+  gfx.drawTextCentered(kFontBold, w / 2, y, "Erase all reading stats?");
+  y += gfx.lineHeight(kFontBold) + 14;
+  gfx.drawTextCentered(kFontSmall, w / 2, y, "Your streak, day history and book");
+  y += lh + 4;
+  gfx.drawTextCentered(kFontSmall, w / 2, y, "totals go back to zero. Books and");
+  y += lh + 4;
+  gfx.drawTextCentered(kFontSmall, w / 2, y, "bookmarks are not touched.");
+  y += lh + 22;
+  gfx.drawTextCentered(kFontSmall, w / 2, y, "ERASE wipes them. BACK keeps them.");
+}
+
+// A 12 px arrow with a 2 px shaft — the reading chrome's whisper-sized
+// cousin of Scene.cpp's drawArrow.
+
+// Reading chrome v3 (Andrew, 2026-08-31): while reading, the tab boxes and
+// the centered status line disappear. Two small words and two small arrows
+// sit at the key centers, and the book's place lives in the lower-right
+// corner — the page number for a compiled book, the percent for a raw epub
+// (its page numbers are per-section and unstable). With Button labels:
+// Hidden only the corner remains. Landscape reading keeps the standard tab
+// column; softKeys() owns that split.
+void ReaderScene::renderReadingChrome(Gfx& gfx) {
+  // Percent for every book (Andrew, 2026-08-31): one honest scalar in the
+  // corner, whatever the engine. Real page numbers still live in the MENU.
+  char corner[32];
+  corner[0] = 0;
+  if (_fbp || _epub) {
+    int pct = static_cast<int>(bookProgress() * 100.0f + 0.5f);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    // Footer modes (2026-09-04): off; page x of y; percent; time left in
+    // this chapter at the reader's pace (pages are known exactly, so this
+    // is one subtraction; the most praised stat on Kobo and Kindle).
+    // With the key labels shown, the corner is the ~80 px right of the
+    // right arrow (the arrows sit at the key centres), so the value takes
+    // its short form there. Hidden labels give the whole band.
+    const bool tight = _readKeyBar;
+    switch (_footerMode) {
+      case 0: break;
+      case 1: {
+        const unsigned cur = _fbp ? _fbpPage + 1u : (_section ? _section->currentPage + 1u : 0u);
+        const unsigned tot = _fbp ? _fbp->pageCount() : (_section ? _section->pageCount : 0u);
+        if (tot) snprintf(corner, sizeof(corner), tight ? "%u/%u" : "%u of %u", cur, tot);
+        break;
+      }
+      case 3: {
+        const int left = chapterPagesLeft(nullptr);
+        if (left >= 0) {
+          const int mins = estimateMinutesLeft(left);
+          if (left == 0) snprintf(corner, sizeof(corner), tight ? "ch end" : "chapter ends here");
+          else if (mins >= 60) snprintf(corner, sizeof(corner), tight ? "%dh %02dm" : "%dh %dm left in chapter", mins / 60, mins % 60);
+          else snprintf(corner, sizeof(corner), tight ? "%d min" : "%d min left in chapter", mins);
+          break;
+        }
+      } /* fallthrough: no chapter data -> percent */
+      default: snprintf(corner, sizeof(corner), "%d%%", pct); break;
+    }
+  }
+
+  const int capH = gfx.capHeight(kFontSmall);
+  const int capOff = gfx.capTopOffset(kFontSmall);
+  const int bandMid = gfx.height() - 12;
+  const int textY = bandMid - capH / 2 - capOff;
+  if (corner[0]) {
+    const int cw = gfx.textWidth(kFontSmall, corner);
+    gfx.drawText(kFontSmall, gfx.width() - 16 - cw, textY, corner);
+  }
+  if (!_readKeyBar) return;  // Button labels: Hidden — only the corner stays
+  gfx.drawTextCentered(kFontSmall, Scene::softKeySlotCenterX(gfx, 0), textY,
+                       _noteReturn >= 0 ? "RETURN" : "BOOKS");
+  gfx.drawTextCentered(kFontSmall, Scene::softKeySlotCenterX(gfx, 1), textY, "MENU");
+  drawMiniArrow(gfx, Scene::softKeySlotCenterX(gfx, 2), bandMid, /*right=*/false);
+  drawMiniArrow(gfx, Scene::softKeySlotCenterX(gfx, 3), bandMid, /*right=*/true);
 }
 
 void ReaderScene::renderBookList(Gfx& gfx) {
+  if (_lifeOpen) {
+    if (_statsResetArm) renderStatsResetConfirm(gfx);
+    else renderStatsLife(gfx);
+    return;
+  }
   const int w = gfx.width();
   const int perPage = kGridCols * kGridRows;
   // Clamp against a shrunken list (rescan may have removed entries); the
   // scroll stays row-aligned.
-  if (_sel > _bookCount - 1) _sel = _bookCount > 0 ? _bookCount - 1 : 0;
+  if (_sel > _totalBooks - 1) _sel = _totalBooks > 0 ? _totalBooks - 1 : 0;
   if (_scroll > _sel) _scroll = (_sel / kGridCols) * kGridCols;
   if (_sel >= _scroll + perPage) _scroll = (_sel / kGridCols - (kGridRows - 1)) * kGridCols;
   if (_scroll < 0) _scroll = 0;
 
   // Header.
   char line[64];
-  snprintf(line, sizeof(line), L10N("Reader (%d)", "Libri (%d)"), _bookCount);
-  gfx.drawText(kFontBold, kListMarginX, 8, line);
-  if (_bookCount > perPage) {
-    snprintf(line, sizeof(line), "%d-%d", _scroll + 1, (_scroll + perPage < _bookCount) ? _scroll + perPage : _bookCount);
+  // Just "Reader": the right-hand range already ends in the same total, and
+  // "Reader (8)   1-4 of 8" said eight twice on one line.
+  gfx.drawText(kFontBold, kListMarginX, 8, _doneView ? "Done" : "Read");
+  if (_totalBooks > perPage) {
+    snprintf(line, sizeof(line), "%d-%d of %d", _scroll + 1,
+             (_scroll + perPage < _totalBooks) ? _scroll + perPage : _totalBooks, _totalBooks);
+    gfx.drawText(kFontRegular, w - kListMarginX - gfx.textWidth(kFontRegular, line), 8, line);
+  } else if (_totalBooks > 0) {
+    snprintf(line, sizeof(line), _totalBooks == 1 ? "%d book" : "%d books", _totalBooks);
     gfx.drawText(kFontRegular, w - kListMarginX - gfx.textWidth(kFontRegular, line), 8, line);
   }
   gfx.fillRect(0, kHeaderH - 2, w, 2, true);
@@ -1000,40 +4872,95 @@ void ReaderScene::renderBookList(Gfx& gfx) {
   {
     const reader::ReadingStats::Band sb = reader::ReadingStats::band();
     const int bandY = kHeaderH;
-    const int numY = bandY + 10;
-    const int capNudge = gfx.lineHeight(kFontBold) - gfx.lineHeight(kFontSmall);
+    const int numY = bandY + 5;
+    // Selected (cursor above the first book): a border makes it read as a
+    // target rather than decoration, and OPEN goes to your reading.
+    if (_sel < 0) gfx.drawRoundedRect(4, bandY + 2, gfx.width() - 8, kStatsBandH - 8, 8, 3, true);
+    // Number and label share a cap BASELINE (their cap bottoms line up); the
+    // old nudge was a line-height difference, which is not the same thing.
+    const int capNudge = gfx.capHeight(kFontBold) - gfx.capHeight(kFontSmall) +
+                         gfx.capTopOffset(kFontBold) - gfx.capTopOffset(kFontSmall);
     char num[16];
 
     if (!sb.clockValid) {
-      // No phone time since boot: totals still count, days can't. Say so
-      // instead of drawing dash numerals and a meaningless week.
-      gfx.drawText(kFontSmall, kListMarginX, numY + capNudge, L10N("Sync iPhone to track streaks", "Sincronizza iPhone per le serie"));
+      // No phone time since boot: days can't be attributed, but the
+      // lifetime totals are still true — show those rather than nagging.
+      // (A small NO DATE pill on the right carries the "why", the same
+      // way Notifications carries SYNC.)
+      const reader::ReadingStats::Summary sum = reader::ReadingStats::summary();
+      // Nothing recorded yet: say nothing. "0 PAGES ALL TIME" is noise on
+      // a shelf, and the band's rule alone is a clean separator.
+      if (sum.lifetimePages > 0) {
+        int x = kListMarginX;
+        char num[16];
+        snprintf(num, sizeof(num), "%lu", (unsigned long)sum.lifetimePages);
+        gfx.drawText(kFontBold, x, numY, num);
+        x += gfx.textWidth(kFontBold, num) + 6;
+        gfx.drawText(kFontSmall, x, numY + capNudge, "PAGES ALL TIME");
+        // "NO DATE" named the symptom; "NEEDS SYNC" names what to do about it.
+        // Centred on the CAP of the number beside it, and the label centred in
+        // the pill — both were off by a few px because the old code centred on
+        // line boxes, which carry different descender slack per face.
+        const char* pill = "NEEDS SYNC";
+        const int capMid = numY + gfx.capTopOffset(kFontBold) + gfx.capHeight(kFontBold) / 2;
+        const int pillW = gfx.textWidth(kFontSmall, pill) + 20;
+        const int pillH = gfx.capHeight(kFontSmall) + 12;
+        const int pillX = w - kListMarginX - pillW;
+        gfx.drawRoundedRect(pillX, capMid - pillH / 2, pillW, pillH, pillH / 2, 1, true);
+        gfx.drawTextCentered(kFontSmall, pillX + pillW / 2,
+                             capMid - gfx.capHeight(kFontSmall) / 2 - gfx.capTopOffset(kFontSmall),
+                             pill);
+      }
     } else {
+      // The week strip owns the right end of the band; the stats fill from the
+      // left and stop 20 px short of it. On the 480 px panel "0 PAGES TODAY"
+      // ran up against the M of MTWTFSS with nothing between them.
+      const int stripLeft = w - kListMarginX - (7 * 9 + 6 * 8) - 20;
       int x = kListMarginX;
-      snprintf(num, sizeof(num), "%u", sb.streakDays);
-      gfx.drawText(kFontBold, x, numY, num);
-      x += gfx.textWidth(kFontBold, num) + 6;
-      gfx.drawText(kFontSmall, x, numY + capNudge, L10N("DAY STREAK", "GIORNI FILA"));
-      x += gfx.textWidth(kFontSmall, L10N("DAY STREAK", "GIORNI FILA")) + 24;
-      snprintf(num, sizeof(num), "%u", sb.todayPages);
-      gfx.drawText(kFontBold, x, numY, num);
-      x += gfx.textWidth(kFontBold, num) + 6;
-      gfx.drawText(kFontSmall, x, numY + capNudge, L10N("PAGES TODAY", "PAGINE OGGI"));
+      // Full label if it fits, short one if not, nothing at all rather than a
+      // collision. The 480 px panel has 329 px before the strip and the two
+      // full labels want 340 — so the X3 reads "0 PAGES TODAY" and the X4
+      // reads "0 TODAY", instead of the X4 silently losing the stat.
+      auto stat = [&](uint16_t n, const char* full, const char* shortLabel) {
+        char v[16];
+        snprintf(v, sizeof(v), "%u", n);
+        const int numW = gfx.textWidth(kFontBold, v) + 6;
+        const char* label = full;
+        if (x + numW + gfx.textWidth(kFontSmall, full) > stripLeft) label = shortLabel;
+        if (x + numW + gfx.textWidth(kFontSmall, label) > stripLeft) return;
+        gfx.drawText(kFontBold, x, numY, v);
+        x += numW;
+        gfx.drawText(kFontSmall, x, numY + capNudge, label);
+        x += gfx.textWidth(kFontSmall, label) + 22;
+      };
+      stat(sb.streakDays, "DAY STREAK", "STREAK");
+      stat(sb.todayPages, "PAGES TODAY", "TODAY");
 
       // Mon..Sun of the current week; future days render as hairline stubs.
       // One type weight for all seven letters, centered under their bars:
       // the old 13 px pitch let adjacent W/M glyphs touch, and the faux-bold
       // today letter outgrew its cell and overlapped. Today is marked with a
       // 2 px underline instead — emphasis that cannot change glyph metrics.
-      const int barW = 9, barGap = 8, barMaxH = 26;
+      // Pitch is set by the WIDEST letter, not by the bar: W is 19 px and M
+      // is 16 in the 10 pt face, which is the smallest the firmware has (there
+      // are three fonts and no downscale). Below a ~17 px pitch adjacent
+      // W/M glyphs touch — tried at 12 and they ran together. So the band
+      // gets tighter VERTICALLY (46 not 56, bars 16 not 26) and keeps the
+      // horizontal pitch the letters need to stay legible.
+      const int barW = 9, barGap = 8, barMaxH = 16;
       const int blockW = 7 * barW + 6 * barGap;
       const int barX0 = w - kListMarginX - blockW;
       const int barBase = bandY + 4 + barMaxH;
+      // Letters sit on a CAP grid, not a line-height grid: drawText's y is the
+      // top of a 24 px line whose 15 px cap starts 5 px down, and assuming
+      // otherwise is what pushed the today underline through the band rule.
+      const int letterTop = barBase + 3 - gfx.capTopOffset(kFontSmall);
+      const int letterBottom = barBase + 3 + gfx.capHeight(kFontSmall);
       uint16_t maxPages = 1;
       for (int i = 0; i < 7; i++) {
         if (sb.weekPages[i] > maxPages) maxPages = sb.weekPages[i];
       }
-      static const char* kDow = L10N("MTWTFSS", "LMMGVSD");
+      static const char* kDow = "MTWTFSS";
       for (int slot = 0; slot < 7; slot++) {
         const int bx = barX0 + slot * (barW + barGap);
         const int daysBack = static_cast<int>(sb.todayWeekday) - slot;
@@ -1045,26 +4972,43 @@ void ReaderScene::renderBookList(Gfx& gfx) {
         gfx.fillRect(bx, barBase - h, barW, h, true);
         const char letter[2] = {kDow[slot], 0};
         const int lw = gfx.textWidth(kFontSmall, letter);
-        gfx.drawText(kFontSmall, bx + (barW - lw) / 2, barBase + 3, letter);
-        if (slot == sb.todayWeekday) {
-          gfx.fillRect(bx, barBase + 3 + gfx.lineHeight(kFontSmall) + 1, barW, 2, true);
-        }
+        gfx.drawText(kFontSmall, bx + (barW - lw) / 2, letterTop, letter);
+        if (slot == sb.todayWeekday) gfx.fillRect(bx, letterBottom + 2, barW, 2, true);
       }
     }
 
     gfx.fillRect(0, kHeaderH + kStatsBandH - 2, w, 2, true);
   }
 
-  if (_bookCount == 0) {
-    gfx.drawTextCentered(kFontBold, w / 2, gfx.height() / 2 - gfx.lineHeight(kFontBold), L10N("No books found", "Nessun libro trovato"));
-    gfx.drawTextCentered(kFontRegular, w / 2, gfx.height() / 2 + 6, L10N("Put .epub files in /books on the SD card", "Copia i file .epub in /books sulla SD"));
+  if (_totalBooks == 0) {
+    // Honest empty states: say what is actually wrong, not "add books" when
+    // the card is missing or every file was skipped (0.6 workstream B).
+    const int cy = gfx.height() / 2;
+    if (!_sdOk) {
+      gfx.drawTextCentered(kFontBold, w / 2, cy - gfx.lineHeight(kFontBold), "No SD card found");
+      gfx.drawTextCentered(kFontRegular, w / 2, cy + 6, "Insert the card, then restart");
+    } else if (_skippedNames > 0) {
+      char msg[64];
+      snprintf(msg, sizeof(msg), "%u file%s skipped", static_cast<unsigned>(_skippedNames),
+               _skippedNames == 1 ? "" : "s");
+      gfx.drawTextCentered(kFontBold, w / 2, cy - gfx.lineHeight(kFontBold), msg);
+      gfx.drawTextCentered(kFontRegular, w / 2, cy + 6, "File names too long - shorten them");
+    } else {
+      gfx.drawTextCentered(kFontBold, w / 2, cy - gfx.lineHeight(kFontBold), "No books found");
+      gfx.drawTextCentered(kFontRegular, w / 2, cy + 6, "Add books from the Flowe app");
+    }
     return;
   }
 
   bool tilesNeedWork = false;
-  for (int i = 0; i < perPage && _scroll + i < _bookCount; i++) {
+  for (int i = 0; i < perPage && _scroll + i < _totalBooks; i++) {
+    if (isDoneTile(_scroll + i)) {  // #26
+      renderDoneTile(gfx, i);
+      continue;
+    }
+    if (!inWindow(_scroll + i)) continue;
     renderTile(gfx, i);
-    if (_books[_scroll + i].meta == TileMeta::Unknown) tilesNeedWork = true;
+    if (entryAt(_scroll + i).meta == TileMeta::Unknown) tilesNeedWork = true;
   }
   // Lazy metadata + thumbs: one tile per quiet tick via the standard
   // arm-then-run dance. Only claims the Work slot when it is free (an
@@ -1072,9 +5016,34 @@ void ReaderScene::renderBookList(Gfx& gfx) {
   if (tilesNeedWork && _work == Work::None) _work = Work::GridMeta;
 }
 
+// #26: the "Done" folder tile — finished books live behind it.
+void ReaderScene::renderDoneTile(Gfx& gfx, const int visibleIndex) {
+  const int idx = _scroll + visibleIndex;
+  const XpRect r = tileRect(visibleIndex);
+  const int cx = r.x + r.w / 2;
+  const int thumbTop = r.y + kThumbTop;
+  if (idx == _sel) {
+    gfx.drawRoundedRect(cx - kThumbW / 2 - kSelInset - kSelThick, thumbTop - kSelInset - kSelThick,
+                        kThumbW + 2 * (kSelInset + kSelThick), kThumbH + 2 * (kSelInset + kSelThick),
+                        kSelRadius, kSelThick, true);
+  }
+  // Folder: a tab, a body, and a small stack of pages inside it.
+  const int fx = cx - kThumbW / 2;
+  gfx.fillRect(fx, thumbTop, kThumbW / 2, 16, true);
+  gfx.drawRoundedRect(fx, thumbTop + 14, kThumbW, kThumbH - 14, 8, 2, true);
+  for (int i = 0; i < 3; i++) {
+    gfx.drawRect(fx + 24 + i * 10, thumbTop + 44 - i * 6, kThumbW - 48 - i * 20, kThumbH - 66, 2, true);
+  }
+  const int titleY = thumbTop + kThumbH + kTitleGap;
+  gfx.drawTextCentered(kFontRegular, cx, titleY, "Done");
+  char sub[24];
+  snprintf(sub, sizeof(sub), _doneCount == 1 ? "%d book" : "%d books", _doneCount);
+  gfx.drawTextCentered(kFontSmall, cx, titleY + gfx.lineHeight(kFontRegular), sub);
+}
+
 void ReaderScene::renderTile(Gfx& gfx, const int visibleIndex) {
   const int idx = _scroll + visibleIndex;
-  const BookEntry& b = _books[idx];
+  const BookEntry& b = entryAt(idx);
   const XpRect r = tileRect(visibleIndex);
 
   const int cx = r.x + r.w / 2;
@@ -1091,34 +5060,197 @@ void ReaderScene::renderTile(Gfx& gfx, const int visibleIndex) {
   bool drewThumb = false;
   if (b.meta == TileMeta::Cover) {
     // Center the aspect-fit thumb (dims cached at grid-work time) in the box.
-    drewThumb = reader::CoverThumb::draw(gfx, b.thumbPath, cx - b.thumbW / 2, thumbTop + (kThumbH - b.thumbH) / 2);
+    // FBP sidecar paths are derived here, not stored — see the fast-pass.
+    char covBuf[sizeof(b.path) + 8];
+    const char* thumb = b.thumbPath;
+    if (endsWithFbpCI(b.path)) {
+      snprintf(covBuf, sizeof(covBuf), "%s.cov", b.path);
+      thumb = covBuf;
+    }
+    drewThumb = reader::CoverThumb::draw(gfx, thumb, cx - b.thumbW / 2, thumbTop + (kThumbH - b.thumbH) / 2);
   }
   if (!drewThumb) {
     // Placeholder frame where the cover would sit; text-only "covers" carry
     // the wrapped title inside it.
     const int fx = cx - kThumbW / 2;
     gfx.drawRoundedRect(fx, thumbTop, kThumbW, kThumbH, 8, 2, true);
-    if (b.meta == TileMeta::NoCover && b.title[0] != '\0') {
+    // FBP without a cover: for a title the UI font cannot render
+    // (Arabic/CJK), the phone-shaped strip goes INSIDE the box — the UI
+    // font would stamp "?????". A title the UI font CAN render draws as
+    // wrapped text below instead: it wraps and truncates properly, where
+    // a strip is a fixed bitmap (and pre-2026-08-31 strips are baked
+    // 220 px wide with clipped titles — "The Adventures of H").
+    bool drewStrip = false;
+    if (endsWithFbpCI(b.path) &&
+        !(b.title[0] && gfx.canRender(kFontRegular, b.title))) {
+      char strip[sizeof(b.path) + 8];
+      snprintf(strip, sizeof(strip), "%s.str", b.path);
+      uint16_t sw, sh;
+      if (readThumbDims(strip, &sw, &sh))
+        // Clip to the box interior: strips compiled before 2026-08-31 are
+        // 220 px wide against this 200 px box and broke out of its border.
+        drewStrip = reader::CoverThumb::draw(gfx, strip, cx - sw / 2,
+                                             thumbTop + (kThumbH - sh) / 2, nullptr, nullptr,
+                                             fx + 3, fx + kThumbW - 3);
+    }
+    if (!drewStrip && b.meta == TileMeta::NoCover && b.title[0] != '\0') {
       const int maxLines = (kThumbH - 40) / gfx.lineHeight(kFontRegular);
       gfx.drawTextWrapped(kFontRegular, fx + 14, thumbTop + 20, b.title, kThumbW - 28, maxLines);
     }
   }
 
-  // Text block under the cover box: title (bold once known, basename until
-  // then) over a small author/status line.
-  const bool loaded = b.meta == TileMeta::Cover || b.meta == TileMeta::NoCover;
-  const XpFont& titleFont = loaded ? kFontBold : kFontRegular;
-  const char* titleSrc = loaded ? b.title : baseName(b.path);
+  // A focus edition looked EXACTLY like its normal twin on the shelf (two
+  // "Meditations" tiles, nothing to tell them apart). Badge the artwork.
+  // Must come BEFORE the strip path below, which returns early — that is
+  // precisely the branch a compiled focus edition takes.
+  if (b.focusEdition) {
+    // A word in a pill covered a fifth of the artwork (Andrew, 2026-08-29).
+    // A bullseye says the same thing in a fifth of the space, and needs no
+    // outline of its own: the white halo separates it from the cover under
+    // it, which a bare mark would disappear into on dark art.
+    const int d = 18;                            // the mark
+    const int pad = 3;                           // halo around it
+    const int bx = cx - kThumbW / 2 + 8;
+    const int by = thumbTop + kThumbH - d - 8;
+    gfx.fillRoundedRect(bx - pad, by - pad, d + 2 * pad, d + 2 * pad,
+                        (d + 2 * pad) / 2, false);
+    gfx.fillRoundedRect(bx, by, d, d, d / 2, true);
+    gfx.fillRoundedRect(bx + 4, by + 4, d - 8, d - 8, (d - 8) / 2, false);
+    gfx.fillRoundedRect(bx + 7, by + 7, d - 14, d - 14, (d - 14) / 2, true);
+  }
+
+  // FBP packages carry a phone-shaped title strip — Arabic/CJK titles render
+  // pixel-perfect where the ASCII UI fonts would stamp "?????".
+  //
+  // Two conditions the shelf used to skip, both visible on glass: the strip
+  // was preferred even for an ASCII title the UI font renders perfectly well
+  // (and, being a fixed-width bitmap, it was CLIPPED by the tile with no
+  // ellipsis — "Alice's Adventures in" simply stopped), and it was drawn at
+  // whatever width it happened to be, overrunning into the next tile.
+  const int tileTextW = r.w - 2 * kTileTextPad;
+  const char* wantTitle = b.title[0] ? b.title : baseName(b.path);
+  if (endsWithFbpCI(b.path) && !gfx.canRender(kFontRegular, wantTitle)) {
+    char strip[sizeof(b.path) + 8];
+    snprintf(strip, sizeof(strip), "%s.str", b.path);
+    uint16_t sw, sh;
+    if (readThumbDims(strip, &sw, &sh) &&
+        reader::CoverThumb::draw(gfx, strip, cx - sw / 2, thumbTop + kThumbH + kTitleGap, nullptr,
+                                 nullptr, cx - tileTextW / 2, cx + tileTextW / 2)) {
+      return;
+    }
+  }
+
+  // Text block under the cover box: title over a small author/status line.
+  // Regular weight on purpose (Andrew, 2026-08-15): bold sans titles next to
+  // the FBP books' quiet serif strips made the shelf read as two different
+  // products. Uniform look truly arrives when every book is a compiled
+  // package; until then the epub tiles stop shouting.
+  const XpFont& titleFont = kFontRegular;
+  const char* titleSrc = wantTitle;
+  // A book you are inside tells you where you are; the author only matters
+  // before you start.
+  char subBuf[24];
   const char* sub = b.meta == TileMeta::Unknown     ? "..."
-                    : b.meta == TileMeta::NotOpened ? L10N("unreadable", "illeggibile")
+                    : b.meta == TileMeta::NotOpened ? "unreadable"
                                                     : b.author;
-  const int textW = r.w - 2 * kTileTextPad;
+  if (b.meta != TileMeta::Unknown && b.meta != TileMeta::NotOpened && b.progressPct > 0) {
+    snprintf(subBuf, sizeof(subBuf), "%u%% read", b.progressPct);
+    sub = subBuf;
+  }
+  const int textW = tileTextW;
   const int titleY = thumbTop + kThumbH + kTitleGap;
+  const int tileBottom = r.y + r.h;
   char clipped[96];
-  truncateToWidth(gfx, titleFont, titleSrc, textW, clipped, sizeof(clipped));
-  gfx.drawTextCentered(titleFont, cx, titleY, clipped);
-  if (sub[0] != '\0') {
+  if (titleY + gfx.lineHeight(titleFont) <= tileBottom) {
+    truncateToWidth(gfx, titleFont, titleSrc, textW, clipped, sizeof(clipped));
+    gfx.drawTextCentered(titleFont, cx, titleY, clipped);
+  }
+  // The author is the first thing to go. A line that does not fit inside its
+  // own tile is not "slightly tight" — it is drawn over the next row, and the
+  // row below's selection border cuts it in half. Belt as well as braces: the
+  // constants above are sized to fit, this guarantees it on any panel.
+  const int subY = titleY + gfx.lineHeight(titleFont);
+  if (sub[0] != '\0' && subY + gfx.lineHeight(kFontSmall) <= tileBottom) {
     truncateToWidth(gfx, kFontSmall, sub, textW, clipped, sizeof(clipped));
-    gfx.drawTextCentered(kFontSmall, cx, titleY + gfx.lineHeight(titleFont) + 2, clipped);
+    gfx.drawTextCentered(kFontSmall, cx, subY, clipped);
+  }
+}
+
+// Bench "where" v2: the launcher-level scene name is not enough — the Reader
+// is a state machine, and blind navigation from "scene=reader" once opened a
+// book instead of a menu. One line says exactly where the UI is.
+// Bench: print the rendered page's per-line paragraph ids (v7 tail proof).
+void ReaderScene::debugLineCids() const {
+  if (!_fbp) {
+    Serial.println("[xphone-os] linecids: no package open");
+    return;
+  }
+  char buf[200];
+  int n = snprintf(buf, sizeof(buf), "[xphone-os] linecids: page=%u count=%u:",
+                   static_cast<unsigned>(_fbpPage), static_cast<unsigned>(_fbp->lineCidCount()));
+  for (uint8_t i = 0; i < _fbp->lineCidCount() && n < static_cast<int>(sizeof(buf)) - 12; i++)
+    n += snprintf(buf + n, sizeof(buf) - n, " %lu", static_cast<unsigned long>(_fbp->lineCid(i)));
+  Serial.println(buf);
+}
+
+void ReaderScene::debugShelfDump() const {
+  Serial.printf("[xphone-os] shelfdump: total=%d win=%d count=%d live=%d done=%d doneView=%d state=%d\n",
+                _totalBooks, _windowOffset, _bookCount, _liveCount, _doneCount, _doneView ? 1 : 0,
+                static_cast<int>(_state));
+  for (int i = 0; i < _bookCount; i++) {
+    const BookEntry& b = _books[i];
+    Serial.printf("[xphone-os] shelfdump: %2d meta=%d '%s'\n", _windowOffset + i,
+                  static_cast<int>(b.meta), baseName(b.path));
+  }
+}
+
+void ReaderScene::debugWhere(char* out, const size_t n) const {
+  switch (_state) {
+    case State::BookList:
+      if (_lifeOpen) {
+        snprintf(out, n, "shelf:reading-life");
+        return;
+      }
+      snprintf(out, n, "%s sel=%d/%d win=%d", _doneView ? "shelf:done" : "shelf", _sel, _totalBooks, _windowOffset);
+      return;
+    case State::Reading: {
+#ifdef FLOWE_PREPARED_GUIDE
+      if (_wcMode) {
+        char word[48] = {};
+        if (_fbp && _wcCount && _wcIdx >= 0 && _wcIdx < _wcCount) _fbp->wordText(_wcWords[_wcIdx], word, sizeof(word));
+        snprintf(out, n, "reading '%s' page=%u word-%s idx=%d/%u word=%s", baseName(_bookPath.c_str()), _fbpPage,
+            _wcSheet ? (_wcGuide ? "guide" : "sheet") : "cursor", _wcIdx, _wcCount, word);
+        return;
+      }
+#endif
+      // menuSel and the orientation are here so a bench sweep can navigate by
+      // fact: without them every menu drive is dead reckoning from whatever
+      // the cursor happened to be, and the direction keys swap in landscape.
+      MenuRow ids[kMenuRowCount];
+      const int rows = menuRows(_fbp != nullptr, _landscapeReady, _noteCachePage == _fbpPage && _noteCacheCount > 0, ids);
+      snprintf(out, n, "reading '%s' %s%s sel=%d/%d marks=%d", baseName(_bookPath.c_str()),
+               _landscape ? "landscape" : "portrait",
+               _menu == MenuView::Page        ? " menu"
+               : _menu == MenuView::SizeStrip  ? " menu:size"
+               : _menu == MenuView::Chapters   ? " menu:chapters"
+               : _menu == MenuView::GoTo       ? " menu:goto"
+               : _menu == MenuView::Bookmarks  ? " menu:bookmarks"
+               : _wcMode                       ? (_wcSheet ? " word-sheet" : " word-cursor")
+               : _menu == MenuView::Notes      ? " menu:notes"
+               : _menu == MenuView::StatsBook  ? " menu:stats-book"
+               : _menu == MenuView::StatsLife  ? " menu:stats-life"
+                                               : "",
+               _menuSel, rows, _markCount);
+      return;
+    }
+    case State::Opening:
+      snprintf(out, n, "opening '%s'", baseName(_bookPath.c_str()));
+      return;
+    case State::Indexing:
+      snprintf(out, n, "indexing '%s'", baseName(_bookPath.c_str()));
+      return;
+    default:
+      snprintf(out, n, "error");
+      return;
   }
 }

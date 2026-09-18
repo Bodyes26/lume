@@ -13,6 +13,31 @@
 #include "Gfx.h"
 #include "Input.h"
 #include "LumeLocale.h"
+// Soft-key labels that are ARROW MARKS rather than words.
+//
+// The UI fonts are ASCII+Latin subsets: U+2190.. simply have no glyph and
+// would draw as "?" (Gfx::findGlyph falls back). So an arrow is a SHAPE the
+// bar painter draws, and these one-byte sentinels are how a scene's plain
+// static label table asks for one. Anything else is drawn as text.
+//
+// THE DIRECTION-KEY RULE (slots 2 and 3, the only pair that ever means
+// "backward / forward"):
+//   Portrait — slot 2 is the LEFT key, slot 3 the RIGHT one.
+//   Landscape — the tab column runs UPWARD from slot 0, so slot 3 is the TOP
+//   key and slot 2 the one below it.
+// Because of that, every landscape pair is drawn VERTICALLY with the up
+// arrow on slot 3, and a screen whose portrait pair reads back-then-forward
+// left to right (page turn, list cursor, -1/+1) must SWAP which key does
+// what when the panel turns — otherwise the arrow points away from the
+// button you press. A scene owns that swap; ReaderScene::dirSwap() is the
+// single place it is decided.
+namespace SoftKey {
+constexpr const char* Left = "\x11";
+constexpr const char* Right = "\x12";
+constexpr const char* Up = "\x13";
+constexpr const char* Down = "\x14";
+inline bool isArrow(const char* s) { return s && s[0] >= '\x11' && s[0] <= '\x14' && s[1] == '\0'; }
+}  // namespace SoftKey
 
 class Scene {
  public:
@@ -20,6 +45,11 @@ class Scene {
   // persistent soft-key bar drawn by SceneManager. Scenes must keep their
   // content above gfx.height() - SOFTKEY_BAR_H.
   static constexpr int SOFTKEY_BAR_H = 44;
+
+  // Horizontal center (portrait) of soft-key slot 0..3 under the rocker
+  // pairing. For a scene that draws its own minimal key hints (the reader's
+  // reading chrome) exactly where the tabs would sit.
+  static int softKeySlotCenterX(Gfx& gfx, int slot);
 
   virtual void onEnter() {}
   virtual void onExit() {}
@@ -32,10 +62,14 @@ class Scene {
   virtual const char* const* softKeys() const;
   // M3: bitmask of soft-key slots (bit i = front button i, Back=0..Right=3)
   // that respond to a LONG PRESS. SceneManager marks those tabs with a small
-  // dot near the tab's top edge. Bit 0 is set by default for every scene:
-  // long-press BACK always jumps to the launcher (OS-wide convention,
-  // enforced in SceneManager::loop — scenes cannot override it).
-  virtual uint8_t longPressSlots() const { return 0x01; }
+  // dot near the tab's top edge.
+  //
+  // Bit 0 is deliberately NOT set by default even though long-press BACK
+  // always jumps to the launcher: a mark that appears on every tab of every
+  // screen forever is decoration, not a hint — and on a 28 px tab it landed
+  // on top of the label ("BAĊK"). The dot is reserved for long presses a
+  // reader could not otherwise guess, like hold-GO to delete a bookmark.
+  virtual uint8_t longPressSlots() const { return 0; }
   // Bitmask of soft-key slots rendered as a small GEAR icon in a half-width tab
   // (right-aligned within the slot, so it shrinks toward the neighbouring tab)
   // instead of a text label. Used for the launcher's Settings key. Default: none.
@@ -47,6 +81,9 @@ class Scene {
   virtual void handleInput(Input& in) = 0;
   // Compose the full scene into the framebuffer (already cleared to white).
   virtual void render(Gfx& gfx) = 0;
+  // Sync in place: a scene that runs behind the previous picture says so,
+  // and the manager drops its dirty flag instead of composing a frame.
+  virtual bool suppressRepaint() const { return false; }
 
   bool isDirty() const { return _dirty; }
   // Full-panel dirty (unknown/most of the screen changed).
@@ -104,6 +141,38 @@ class SceneManager {
   // Exit the old scene, enter the new one; next render uses a FULL refresh.
   void switchTo(Scene& s);
 
+  // The next paint of the active scene is a FULL refresh (clean slate), used
+  // when coming back from the sleep screen without a scene switch.
+  void requestFullRepaint() {
+    _needFull = true;
+    if (_active) _active->markDirty();
+  }
+  // Same, but the next paint is the HALF ghost scrub: used when the nap
+  // poster took several FAST updates and the wake should clean their traces.
+  void requestScrubRepaint() {
+    requestFullRepaint();
+    _sinceScrub = kScrubAfterRefreshes;
+  }
+
+  // While paused (the nap: the sleep screen is on the glass) no scene paints,
+  // whoever asks — loop(), renderNow(), a card handler. Dirty flags keep
+  // accumulating, so the first paint after the pause shows everything.
+  void setPaused(bool paused) { _paused = paused; }
+  bool paused() const { return _paused; }
+
+  // Flush the frame buffer as it is, through the flush task (which holds the
+  // no-light-sleep and APB locks), and wait for it. A direct gfx.flush() from
+  // the main task can be interrupted by a light-sleep slice: the X4 napped
+  // mid-waveform and the sleep poster never reached the glass (2026-09-05).
+  enum class NowTier : uint8_t { Fast, Half, Full };
+  void flushFramebufferNow(Gfx& gfx, NowTier tier) {
+    waitFlushIdle();
+    ensureFlushTask(gfx);
+    dispatchFlush(tier == NowTier::Full ? FlushReq::Full : tier == NowTier::Half ? FlushReq::Half : FlushReq::Fast,
+                  XpRect{0, 0, 0, 0});
+    waitFlushIdle();
+  }
+
   // One tick: OS-wide long-press BACK -> launcher, else forward input to the
   // active scene; then repaint if dirty. (Defined in Scene.cpp: it needs the
   // AppScenes navigation helpers.)
@@ -116,19 +185,43 @@ class SceneManager {
   // that is actually on glass.
   Scene* active() const { return _active; }
 
+  // Repaint from inside a long blocking operation (a multi-minute HTTP
+  // upload starves the main loop, so the transfer panel froze at "0 KB
+  // moved" — 2026-08-18). Same thread as loop(); renderIfDirty already
+  // defers while the flush worker is busy. No-op before the first render.
+  void renderNow();
+  // Sync in place: compose the active scene's frame into the framebuffer
+  // without flushing, so a scene that takes over silently paints its pill
+  // over the picture that is really on glass (the framebuffer may hold an
+  // older frame: the reader lends it out as a decode window).
+  void composeActive(Gfx& gfx);
+
   // M5 responsiveness (Phase 2): true while the flush worker is driving the
   // panel. renderIfDirty() defers composing while set (state keeps advancing;
   // the next compose shows the newest state — natural coalescing).
   bool flushInFlight() const { return _flushInFlight; }
+  TaskHandle_t flushTask() const { return _flushTask; }  // stats: stack high-water mark
   // Block until the worker is idle. MUST be called before any direct
   // gfx.flush()/panel teardown outside the worker (Sleep::sleepNow, restart).
   void waitFlushIdle() const;
 
  private:
   Scene* _active = nullptr;
+  bool _paused = false;
   bool _needFull = false;
   // M2.1a refresh discipline state.
   uint8_t _sinceScrub = 0;   // FAST/PARTIAL refreshes since the last FULL/HALF
+  // X4, 2026-09-07 (Andrew: "the book gallery and the home screen collide").
+  // A windowed update that starts the instant a FULL-PANEL update finishes
+  // brings the pre-full image back everywhere outside its window. Proven on
+  // the bench: gallery -> BACK -> a Left press 150 ms later left the launcher
+  // only inside the window and the whole book grid around it, while the
+  // framebuffer held a perfect launcher. A settled window after the same
+  // full-panel update is clean, and a window after a window is clean, so the
+  // panel needs the full-panel waveform to finish settling before it can be
+  // driven differentially again. Promote that one repaint to full-panel: it
+  // costs ~30 ms (PARTIAL 551-579 ms vs FAST 594 ms) and only in this race.
+  bool _deferredBehindFullPanel = false;
   uint8_t _bootFlushes = 0;  // full-panel flushes since boot (panel conditioning gate)
 
   // M5 Phase 2 — flush worker: the loop task composes the frame (stores are

@@ -1,5 +1,10 @@
 #include "Scene.h"
 
+extern bool gDeviceIsX3;  // BoardConfig detect, defined in main.cpp
+#if XP_LIGHT_SLEEP_LIBS
+#include <esp_pm.h>
+#endif
+
 #include <Arduino.h>
 
 #include "Fonts.h"
@@ -27,6 +32,51 @@ constexpr int kTabRadius = 10;  // top-corner radius
 // front buttons instead of stretching edge to edge.
 constexpr int kBarMarginPct = 8;
 constexpr int kTabGap = 10;
+// Rocker pairing (Andrew, 2026-08-31): slots 0+1 sit on one physical rocker
+// bar and 2+3 on the other, so the bar should read as two pairs, not four
+// islands. Each tab is 10% narrower than its slot and snugs toward its
+// rocker's centerpoint, with this gap between the two halves of one rocker.
+constexpr int kTabGapIntra = 6;
+// Landscape stacks four tabs down a 480/528 px edge instead of across it, so
+// the same 10 px gap costs height the stacked letters need. 6 px keeps the
+// tabs visually separate and buys the 5-letter labels (BOOKS) their pitch.
+constexpr int kTabGapV = 6;
+// Stacked-letter pitch = cap height + this. Measured from the font's own 'H',
+// never from lineAdvance (24 px against a 15 px cap — prose leading, far too
+// loose stacked). ONE pitch for every landscape label so the bar reads as one
+// system; a label too long to fit at this pitch is ABBREVIATED by the scene,
+// never crushed.
+constexpr int kStackGap = 3;
+// The longest label the fixed pitch can hold. Scenes must abbreviate past it
+// (SELECT -> OK); drawSoftKeyTabVertical tightens as a last resort and says so.
+constexpr int kStackMaxLetters = 5;
+// Arrow mark length. Portrait tabs are 28 px tall, so 20 is near the ceiling;
+// a landscape tab is ~100 px tall and 38 wide, where 20 looked lost — 26 fills
+// it without the head (2 * 26 * 5/12 = 21 px wide) touching the sides.
+constexpr int kArrowLen = 20;
+constexpr int kArrowLenV = 26;
+
+// The four arrow marks, drawn from primitives: a shaft plus a solid
+// triangular head. dir is a SoftKey:: sentinel byte (0x11..0x14).
+void drawArrow(Gfx& gfx, int cx, int cy, int len, char dir, bool ink) {
+  const bool horiz = (dir == '\x11' || dir == '\x12');
+  const bool toward0 = (dir == '\x11' || dir == '\x13');  // points at -x / -y
+  const int half = len / 2;
+  const int head = (len * 5) / 12;
+  constexpr int kShaft = 3;
+  if (horiz) gfx.fillRect(cx - half, cy - kShaft / 2, len, kShaft, ink);
+  else gfx.fillRect(cx - kShaft / 2, cy - half, kShaft, len, ink);
+  for (int i = 0; i < head; i++) {
+    // One row/column per step, widening away from the tip.
+    if (horiz) {
+      const int x = toward0 ? cx - half + i : cx + half - 1 - i;
+      gfx.fillRect(x, cy - i, 1, 2 * i + 1, ink);
+    } else {
+      const int y = toward0 ? cy - half + i : cy + half - 1 - i;
+      gfx.fillRect(cx - i, y, 2 * i + 1, 1, ink);
+    }
+  }
+}
 
 // Small settings gear from 1-bit primitives: eight teeth around a solid body
 // with a carved centre hole. Centred on (cx, cy); `ink` inverts for the
@@ -56,9 +106,16 @@ struct TabGeom {
 TabGeom softKeyTabGeom(Gfx& gfx, int slot, bool isIcon) {
   const int w = gfx.width();
   const int marginX = (w * kBarMarginPct) / 100;
-  const int tabW = (w - 2 * marginX - 3 * kTabGap) / 4;
+  const int slotW = (w - 2 * marginX - 3 * kTabGap) / 4;
+  // Rocker centerpoints, derived from the legacy four-slot grid so the
+  // pairs stay over the physical keys: cA between slots 0 and 1, cB
+  // between 2 and 3. Tabs are 10% narrower and lean into their center.
+  const int tabW = (slotW * 9) / 10;
+  const int cA = marginX + slotW + kTabGap / 2;
+  const int cB = marginX + 3 * slotW + (5 * kTabGap) / 2;
+  const int c = slot < 2 ? cA : cB;
   const int tabY = gfx.height() - kTabH;
-  int x = marginX + slot * (tabW + kTabGap);
+  int x = (slot % 2 == 0) ? c - kTabGapIntra / 2 - tabW : c + kTabGapIntra / 2;
   int tw = tabW;
   if (isIcon) {
     tw = tabW / 2;
@@ -82,6 +139,8 @@ void drawSoftKeyTab(Gfx& gfx, int slot, const char* label, bool longPress, bool 
   const bool ink = !pressed;  // glyph colour: black on white, white on black
   if (isIcon) {
     drawGear(gfx, g.x + g.w / 2, g.y + kTabH / 2 + 1, 8, ink);
+  } else if (SoftKey::isArrow(label)) {
+    drawArrow(gfx, g.x + g.w / 2, g.y + kTabH / 2, kArrowLen, label[0], ink);
   } else if (label && label[0]) {
     const int textY = g.y + (kTabH - gfx.lineHeight(kFontSmall)) / 2 + 1;
     gfx.drawTextCentered(kFontSmall, g.x + g.w / 2, textY, label, ink);
@@ -94,17 +153,93 @@ void drawSoftKeyTab(Gfx& gfx, int slot, const char* label, bool longPress, bool 
   }
 }
 
+// Landscape: the four tabs run down the panel's button edge, and the label
+// reads DOWNWARD one letter per line ("D O W N" stacked) rather than lying on
+// its side — sideways words are legible in principle and unreadable at a
+// glance, which is the only kind of reading a button label gets.
+//
+// Slot 0 sits at the BOTTOM: rotating the panel maps the portrait bar's
+// leftmost key to the bottom of this edge, and the hardware does not move.
+void drawSoftKeyTabVertical(Gfx& gfx, int slot, const char* label, bool longPress, bool isIcon) {
+  const int w = gfx.width();
+  const int h = gfx.height();
+  const int colW = Scene::SOFTKEY_BAR_H - 6;
+  const int marginY = (h * kBarMarginPct) / 100;
+  const int fullSlotH = (h - 2 * marginY - 3 * kTabGapV) / 4;
+  const int x = w - colW;
+  // Rocker pairing, vertical: slot 0 is the BOTTOM key, so slots 0+1 are
+  // the lower rocker and 2+3 the upper one. Same rule as portrait — 10%
+  // shorter than the slot, leaning into the rocker's centerpoint.
+  const int slotH = (fullSlotH * 9) / 10;
+  const int cA = h - marginY - fullSlotH - kTabGapV / 2;
+  const int cB = h - marginY - 3 * fullSlotH - (5 * kTabGapV) / 2;
+  const int c = slot < 2 ? cA : cB;
+  const int y = (slot % 2 == 0) ? c + kTabGapIntra / 2 : c - kTabGapIntra / 2 - slotH;
+
+  gfx.fillRect(x, y, colW, slotH, false);
+  // Extend past the right edge so drawPixel clips it: only the LEFT corners
+  // round, mirroring how the portrait bar keeps only its top corners.
+  gfx.drawRoundedRect(x, y, colW + kTabRadius, slotH, kTabRadius, 1, true);
+
+  if (isIcon) {
+    drawGear(gfx, x + colW / 2, y + slotH / 2, 8, true);
+    return;
+  }
+  if (SoftKey::isArrow(label)) {
+    drawArrow(gfx, x + colW / 2, y + slotH / 2, kArrowLenV, label[0], true);
+    return;
+  }
+  if (!label || !label[0]) return;
+
+  // ONE pitch for every label in the bar, derived from the font's own cap
+  // height. A fixed pitch is what makes SELECT and GO look like the same
+  // system — the old code used lineHeight and then squeezed only the long
+  // labels, so every tab had its own spacing.
+  int n = 0;
+  for (const char* p = label; *p; p++) n++;
+  const int capH = gfx.capHeight(kFontSmall);
+  int pitch = capH + kStackGap;
+  // Ink runs from the first cap's top to the last cap's bottom — the trailing
+  // gap is not ink, so it must not be counted when centring.
+  const int avail = slotH - 8;
+  if ((n - 1) * pitch + capH > avail) {
+    // The scene should have abbreviated (kStackMaxLetters). Tighten to a hard
+    // floor rather than draw off the end, and say so on serial once seen.
+    pitch = n > 1 ? (avail - capH) / (n - 1) : capH;
+    if (pitch < capH + 1) pitch = capH + 1;
+    Serial.printf("[xphone-os] softkey: '%s' (%d) over %d letters — pitch %d\n", label, n,
+                  kStackMaxLetters, pitch);
+  }
+  int top = y + (slotH - ((n - 1) * pitch + capH)) / 2;  // top pixel of cap 1
+  const int capOff = gfx.capTopOffset(kFontSmall);
+  for (const char* p = label; *p; p++, top += pitch) {
+    const char one[2] = {*p, 0};
+    gfx.drawTextCentered(kFontSmall, x + colW / 2, top - capOff, one);
+  }
+  if (longPress) {
+    constexpr int kDot = 3;
+    gfx.fillRoundedRect(x + 4, y + (slotH - kDot) / 2, kDot, kDot, 1, true);
+  }
+}
+
 void drawSoftKeyBar(Gfx& gfx, const char* const* labels, const uint8_t longPressSlots,
                     const uint8_t iconMask) {
   if (!labels) return;
+  const bool landscape = gfx.orientation() == Gfx::Orient::Landscape;
   for (int i = 0; i < 4; i++) {
     const char* label = labels[i];
     const bool isIcon = iconMask & (1u << i);
     if (!isIcon && (!label || label[0] == '\0')) continue;  // hidden tab
-    drawSoftKeyTab(gfx, i, label, longPressSlots & (1u << i), isIcon, /*pressed=*/false);
+    if (landscape) drawSoftKeyTabVertical(gfx, i, label, longPressSlots & (1u << i), isIcon);
+    else drawSoftKeyTab(gfx, i, label, longPressSlots & (1u << i), isIcon, /*pressed=*/false);
   }
 }
 }  // namespace
+
+int Scene::softKeySlotCenterX(Gfx& gfx, int slot) {
+  const TabGeom g = softKeyTabGeom(gfx, slot, /*isIcon=*/false);
+  return g.x + g.w / 2;
+}
 
 void SceneManager::loop(Input& in, Gfx& gfx) {
   if (!_active) return;
@@ -113,7 +248,9 @@ void SceneManager::loop(Input& in, Gfx& gfx) {
     // (scenes cannot override this in this iteration). The event is consumed
     // here — handleInput is skipped this tick, and wasLongPressed is a
     // one-tick flag, so the (possibly new) scene never sees it. A no-op on
-    // the launcher itself (switchTo returns early on the active scene).
+    // the current root itself (switchTo returns early on the active scene).
+    // Phase 2: "home" is the Widget HomeScene when that layout is on —
+    // otherwise the launcher, exactly as before.
     showLauncher();
   } else {
     _active->handleInput(in);
@@ -123,6 +260,19 @@ void SceneManager::loop(Input& in, Gfx& gfx) {
 // (E2 press-invert feedback was tried and REMOVED: a release landing while the
 // press-flash was still mid-waveform skipped its restore — tabs stuck black.
 // The driver's displayWindowFlash stays available if a stateless use appears.)
+
+void SceneManager::renderNow() {
+  if (_flushGfx) renderIfDirty(*_flushGfx);
+}
+
+void SceneManager::composeActive(Gfx& gfx) {
+  if (!_active) return;
+  waitFlushIdle();
+  gfx.clear();
+  _active->render(gfx);
+  drawSoftKeyBar(gfx, _active->softKeys(), _active->longPressSlots(), _active->softKeyIconMask());
+  _active->clearDirty();
+}
 
 void SceneManager::switchTo(Scene& s) {
   if (_active == &s) return;
@@ -151,16 +301,31 @@ constexpr int kPartialMaxAreaPct = 50;
 // panel conditioning (Uc8253X3Driver.cpp:143 _initialFullSyncsRemaining = 2);
 // partial flushes bypass display(), so hold them back until two full-panel
 // flushes have run through it.
-constexpr uint8_t kConditioningFlushes = 2;
+// The boot splash already runs one full display() before the first scene, so
+// ONE more here completes the X3 driver's two conditioning syncs; holding
+// partial windows back for a second scene flush cost a FAST (~450 ms) for
+// nothing (efficiency audit 2026-09-02).
+constexpr uint8_t kConditioningFlushes = 1;
 }  // namespace
 
 void SceneManager::renderIfDirty(Gfx& gfx) {
+  if (_paused) return;  // the sleep screen owns the glass (nap)
   if (!_active || !_active->isDirty()) return;
+  if (_active->suppressRepaint()) {
+    _active->clearDirty();  // the picture on glass belongs to the scene before
+    return;
+  }
   // M5 Phase 2: a flush is still driving the panel — defer. The scene's dirty
   // state persists and keeps accumulating, so the next compose (right after
   // the worker goes idle) shows the NEWEST state. Input/BLE keep pumping on
   // the loop for the whole waveform instead of blocking inside gfx.flush().
-  if (_flushInFlight) return;
+  if (_flushInFlight) {
+    // Remember that this repaint waited out a full-panel waveform: the panel
+    // cannot take a windowed differential straight afterwards (see
+    // _deferredBehindFullPanel in Scene.h).
+    if (_flushReq != FlushReq::Window) _deferredBehindFullPanel = true;
+    return;
+  }
 
   // M4 power model: the panel controller stays powered for the whole awake
   // session (idle-sleep removed — the only panel deepSleep left is inside
@@ -178,6 +343,9 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
   // the partial paths stream their window rows from).
   gfx.clear();
   _active->render(gfx);
+  // The tabs sit against the PHYSICAL button edge in both orientations —
+  // rotating the panel does not move the buttons. drawSoftKeyBar picks the
+  // horizontal or vertical layout from the current orientation.
   drawSoftKeyBar(gfx, _active->softKeys(), _active->longPressSlots(), _active->softKeyIconMask());
   const unsigned long t1 = millis();
 
@@ -190,14 +358,29 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
   // HALF scrub bounds the accumulated ghosting (experiment: eyes on glass).
   FlushReq req;
   if (_needFull && _bootFlushes < kConditioningFlushes) {
-    req = FlushReq::Full;  // boot conditioning: the X3 driver needs 2 full syncs
+    // Boot conditioning. The X3 driver needs its full syncs. On the X4 the
+    // warmed HALF is the vendor's own clean (1.7 s); the true FULL is 3.8 s
+    // and a cold boot already showed the splash (docs/eink-panel-notes.md).
+    req = gDeviceIsX3 ? FlushReq::Full : FlushReq::Half;
     _sinceScrub = 0;
     _bootFlushes++;
   } else if (_sinceScrub >= kScrubAfterRefreshes) {
     req = FlushReq::Half;  // periodic ghost scrub (CrossPoint cadence)
     _sinceScrub = 0;
     if (_bootFlushes < kConditioningFlushes) _bootFlushes++;
-  } else if (rectUsable && !_needFull && _bootFlushes >= kConditioningFlushes) {
+  } else if (rectUsable && !_needFull && !_deferredBehindFullPanel &&
+             gDeviceIsX3 && _bootFlushes >= kConditioningFlushes) {
+    // X3 only (2026-09-08). The X4's windowed refresh does not drive its
+    // pixels all the way: leave an app, come back to the launcher, and move
+    // the cursor a few times, and the lower rows wash out to a ghost while
+    // the framebuffer holds a perfect frame. Andrew: "parts of the last
+    // screen come back again and again". Several windows in a row compound
+    // it. It buys almost nothing anyway — a window is 550 to 580 ms against
+    // a full-panel FAST's 594 — because the vendor 0xFC sequence drives the
+    // whole panel either way and only the SPI write is smaller. So the X4
+    // takes the full-panel FAST and keeps a correct screen. The X3's
+    // partial is a different implementation (UC8253 PTL, M5 Phase 3) and
+    // was checked on its own glass, so it keeps the window.
     req = FlushReq::Window;
     _sinceScrub++;  // FAST fallback is differential too — it accrues ghosting
   } else {
@@ -208,6 +391,7 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
 
   _active->clearDirty();
   _needFull = false;
+  _deferredBehindFullPanel = false;
   _composeMs = t1 - t0;
   gRefreshStats.drawMs = _composeMs;
   gRefreshStats.sinceScrub = _sinceScrub;
@@ -254,6 +438,16 @@ void SceneManager::flushWorkLoop() {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     Gfx& gfx = *_flushGfx;
     const XpRect rect = _flushRect;
+#if XP_LIGHT_SLEEP_LIBS
+    // P4: the panel waveform and the SPI bursts must not straddle a light
+    // sleep (or an APB clock change). Held for the whole flush.
+    static esp_pm_lock_handle_t sNoSleep = nullptr;
+    static esp_pm_lock_handle_t sApbMax = nullptr;
+    if (!sNoSleep) esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "flush_ls", &sNoSleep);
+    if (!sApbMax) esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "flush_apb", &sApbMax);
+    esp_pm_lock_acquire(sNoSleep);
+    esp_pm_lock_acquire(sApbMax);
+#endif
     const unsigned long t1 = millis();
     const char* tier = "FAST";
     switch (_flushReq) {
@@ -286,5 +480,9 @@ void SceneManager::flushWorkLoop() {
                   gRefreshStats.drawMs, gRefreshStats.refreshMs, tier, gRefreshStats.sinceScrub,
                   rect.x, rect.y, rect.w, rect.h);
     _flushInFlight = false;  // release AFTER the panel is fully idle
+#if XP_LIGHT_SLEEP_LIBS
+    esp_pm_lock_release(sApbMax);
+    esp_pm_lock_release(sNoSleep);
+#endif
   }
 }

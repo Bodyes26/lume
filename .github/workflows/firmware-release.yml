@@ -39,9 +39,8 @@ jobs:
           path: ~/.platformio
           key: ${{ runner.os }}-platformio-${{ hashFiles('xphone-os/platformio.ini') }}
 
-      - name: Install PlatformIO 6.1.19
-        run: python -m pip install platformio==6.1.19
-
+      - name: Install PlatformIO and esptool
+        run: python -m pip install platformio==6.1.19 "esptool>=5,<6"
       - name: Resolve release version
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
@@ -84,6 +83,17 @@ jobs:
           cp dist/update_it.bin "dist/lume-x3-it-${VERSION}.bin"
           cp dist/update_en.bin "dist/lume-x3-en-${VERSION}.bin"
 
+          # Merged full-flash images (bootloader + partitions + app) for web flasher / offset 0
+          esptool.py --chip esp32c3 merge_bin -o dist/lume-full-it.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0000 xphone-os/.pio/build/lume-x3-it/bootloader.bin \
+            0x8000 xphone-os/.pio/build/lume-x3-it/partitions.bin \
+            0x10000 xphone-os/.pio/build/lume-x3-it/firmware.bin
+          esptool.py --chip esp32c3 merge_bin -o dist/lume-full-en.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0000 xphone-os/.pio/build/lume-x3-en/bootloader.bin \
+            0x8000 xphone-os/.pio/build/lume-x3-en/partitions.bin \
+            0x10000 xphone-os/.pio/build/lume-x3-en/firmware.bin
           # Each zip keeps the boot updater's required update.bin name while
           # its folder and archive make the selected locale unambiguous.
           for locale in it en; do

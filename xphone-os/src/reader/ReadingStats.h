@@ -12,12 +12,13 @@
 // includes the fell-asleep tail (bounded by auto-sleep). The band shows pages;
 // minutes ride along in the same records for the app's charts.
 //
-// "Today" derives from ClockStore: the DS3231 seed taken at boot, or the phone's
-// time.sync, rolled forward by millis(). With no clock source since boot
-// (day == 0) sessions still update book totals but skip day/streak attribution
-// rather than inventing dates.
+// The device has no RTC: "today" derives from the phone-synced ClockStore
+// (yyyymmdd + minutes-into-day + millis() elapsed since sync). With no sync
+// since boot (day == 0) sessions still update book totals but skip day/streak
+// attribution rather than inventing dates.
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 
 namespace reader {
@@ -39,8 +40,54 @@ class ReadingStats {
   };
   static Band band();
 
+  // Per-book lifetime totals for the reader menu's stats page. Includes
+  // the OPEN session's live pages/time when it is this book. Returns
+  // false when the book has no recorded reading yet (and no session).
+  static bool bookStats(const std::string& bookPath, uint32_t* pages, uint32_t* minutes,
+                        uint32_t* lastDay, uint32_t* firstDay = nullptr,
+                        uint16_t* daysRead = nullptr);
+
+  // Today's recorded reading minutes plus the open session's live time
+  // (0 when the clock is unknown).
+  static uint16_t todayMinutes();
+
+  // Minutes since this session opened its book (0 when no session is
+  // live). Feeds the F1 position stream's "min" field.
+  static uint16_t sessionMinutes();
+
+  // Everything the full stats page shows beyond the band: records and
+  // lifetime totals derived from the same 64-day ring and book table.
+  struct Summary {
+    uint16_t longestStreak;   // best consecutive-day run inside the ring
+    uint16_t bestDayMinutes;  // single best day inside the ring
+    uint32_t lifetimeMinutes;
+    uint32_t lifetimePages;
+    uint16_t booksThisYear;   // books with reading recorded this calendar year
+    uint16_t booksAllTime;    // books with ANY recorded reading — needs no clock,
+                              // so the stats page still has something to say
+                              // before the phone has ever set the date
+    uint32_t monthMask;       // bit (d-1) set = read on day d of this month
+    uint8_t monthDays;        // days in the current month
+    uint8_t monthRead;        // how many of them have reading
+    bool clockValid;
+  };
+  static Summary summary();
+
+  // Today as yyyymmdd from the phone-synced clock (0 = never synced).
+  // Exposed so the stats page can title itself with the real month.
+  static uint32_t todayYmdPublic();
+
   // Whole store as JSON for the transfer server's /stats endpoint.
   static std::string toJson();
+  // Emit complete JSON fragments without allocating the whole report.
+  // Stop as soon as the receiver refuses a fragment.
+  using JsonSink = bool (*)(const char*, size_t, void*);
+  static bool writeJson(JsonSink sink, void* context);
+
+  // Erase everything recorded — the day ring, the book table, and any open
+  // session's accumulated pages/time (flowe-os#44). An open session keeps
+  // running from zero, so reading after the reset counts normally.
+  static bool resetAll();
 
  private:
   static void load();

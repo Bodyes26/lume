@@ -29,13 +29,16 @@
 #include "BlockStatusStore.h"
 #include "ClockStore.h"
 #include "CompanionSync.h"
+#include "CpuBoost.h"
 #include "Ds3231.h"
 #include "Fonts.h"
 #include "Gfx.h"
 #include "Input.h"
-#include "NotificationStore.h"
-#include "RemindersStore.h"
 #include "Scene.h"
+#include "StallWatch.h"
+#include "TransferSync.h"
+#include "scenes/AppScenes.h"
+#include "RemindersStore.h"
 #include "LumeLocale.h"
 #include "TodayStore.h"
 #include "WorkoutStore.h"
@@ -56,8 +59,10 @@ static EInkDisplay display(BoardConfig::DEFAULT_DEVICE.display.sclk, BoardConfig
                            BoardConfig::DEFAULT_DEVICE.display.rst, BoardConfig::DEFAULT_DEVICE.display.busy);
 
 static Gfx gfx(display);
+Gfx* G_GFX = &gfx;
+bool gDeviceIsX3 = true;
+int8_t gWifiTxPowerQuarterDb = 0;
 static Input input;
-
 // M2.1b (power lever 3): XP_CPU_MHZ (default 80) now lives in CpuBoost.h,
 // together with the work-scoped 160 MHz guard the reader uses around
 // CPU-bound jobs (indexing, page compose, cover decode). The park below at
@@ -107,6 +112,10 @@ static void bootTrace(const char* stage) {
   f.close();
 }
 
+void xpTrace(const char* stage) {
+  stallwatch::stage(stage);
+  bootTrace(stage);
+}
 // M4.2 wake diagnostic: esp_reset_reason() -> short label. Captured at the very
 // top of boot() so the About scene can show whether the X3 power-button wake is
 // a genuine deep-sleep resume (DEEPSLEEP) or a full power-on reset (POWERON) —
@@ -141,17 +150,19 @@ static void boot() {
   Serial.setTxTimeoutMs(1);
   const unsigned long tSerial = millis();
 
-  // Stage 2: X3 guard, then display. Lume links only the UC8253 X3 driver,
-  // so a misplaced update.bin must be rejected before any panel command.
-  // The fingerprint requires at least two of the X3-only gauge/RTC/IMU in
-  // two consecutive passes; anything else halts for USB recovery.
-  if (!freeink::detectXteinkIsX3()) {
+  // Stage 2: X3 guard, then display. Lume targets Xteink X3, but supports both
+  // panel controllers (UC8253 on original units and UC8279d on newer batches).
+  // A misplaced build running on an X4 or foreign board is rejected before any
+  // panel command.
+  if (!freeink::selectXteinkDevice()) {
     Serial.println("[lume] FATAL: Xteink X3 fingerprint not found; display left untouched");
     Serial.flush();
     while (true) delay(1000);
   }
   display.setDisplayX3();
-  Serial.println("[lume] boot: Xteink X3 confirmed");
+  stallwatch::begin();
+  Serial.printf("[lume] boot: Xteink X3 confirmed (%s)\n",
+                BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279 ? "UC8279d" : "UC8253");
 
   // Stage 2.1 (v0.4): seed local time from the DS3231 on the sensor bus. It
   // MUST run here — after detectXteinkIsX3() (which ends with Wire.end()) and
@@ -653,13 +664,35 @@ static void reportRuntimeStats() {
 }
 
 void loop() {
+  stallwatch::beat();
   input.update();           // debounced button edges (SDK InputManager)
   checkPowerButton();       // press+release -> deep sleep; hold ~2.5s -> restart
   checkAutoSleep();         // M4: idle -> deep sleep (2 min window while a block is active)
   pumpCompanionEvents();         // BLE/ANCS: parse queued payloads, set dirty flags
   COMPANION_BLE.tickAdvPolicy();  // M2.1b: fast->slow advertising demotion
+  COMPANION_BLE.tickAdvWatchdog(); // 0.7: watchdog prevents silent radio hang
   SCENES.loop(input, gfx);       // handle input; repaint only when a scene is dirty
   reportRuntimeStats();          // M2.1d: 60s stack/heap/ANCS-queue audit line
   delay(10);                     // 10ms poll cadence — no periodic redraws
+}
+
+// Poll only control input during blocking HTTP work.
+bool transfer_sync::pollControls() {
+  static uint32_t lastPoll = 0;
+  if (millis() - lastPoll >= 20) {
+    lastPoll = millis();
+    input.update();
+    if (input.wasPressed(Btn::Back) || input.wasLongPressed(Btn::Back)) requestCancel();
+  }
+  return cancelRequested();
+}
+
+void quietRestartToScene(uint32_t sceneId) {
+  Serial.printf("[lume] quiet restart to scene %lu (free=%u largest=%u)\n",
+                static_cast<unsigned long>(sceneId), ESP.getFreeHeap(),
+                static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  Sleep::armRestoreScene(sceneId);
+  SCENES.waitFlushIdle();
+  esp_restart();
 }
 

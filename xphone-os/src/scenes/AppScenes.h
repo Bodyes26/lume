@@ -9,18 +9,18 @@
 
 #include "../games/GameTypes.h"
 
-// Firmware version shown in About (AboutScene.cpp:36), in the Settings header
-// and footer (SettingsScene.cpp:287,300) and served by GET /health and
-// GET /info (net/FileTransferServer.cpp:70,146,155). A macro, not a constant,
-// so the release workflow can inject the released tag with
-// -DXPHONE_VERSION='"<tag>"' (.github/workflows/firmware-release.yml) instead
-// of shipping an image whose About lies about its own version. Local builds
-// pass no flag and keep the default below. The historic symbol name is kept to
-// minimise the diff with upstream (docs/lume/CURRENT-STATE.md:49-51).
+#if __has_include("generated/xphone_version.h")
+#include "generated/xphone_version.h"
+#ifndef XPHONE_VERSION
+#define XPHONE_VERSION XPHONE_MARKETING
+#endif
+constexpr const char* XPHONE_GIT_REV_STR = XPHONE_GIT_REV;
+#else
 #ifndef XPHONE_VERSION
 #define XPHONE_VERSION "0.1.0-dev"
 #endif
-
+constexpr const char* XPHONE_GIT_REV_STR = "dev";
+#endif
 // M4.2 last-scene restore: a stable id for each restorable scene. Persisted in
 // RTC memory at sleep (Sleep.cpp) and dispatched by boot() on wake so the
 // device returns to whatever was on glass. Values are explicit so the
@@ -45,6 +45,7 @@ enum class SceneId : uint32_t {
   Mines = 13,
   TrailList = 14,
   TrailGame = 15,
+  Wifi = 16,
 };
 
 // Single source of truth for "what scene is on glass" — set by every show*()
@@ -55,7 +56,8 @@ extern SceneId gCurrentSceneId;
 // matching show*() so the scene's onEnter re-requests its data). Unknown ids
 // fall back to the launcher.
 void showSceneById(SceneId id);
-
+void showSceneByIdQuiet(SceneId id);
+void quietRestartToScene(uint32_t id);
 // Short human-readable name for a scene id ("Launcher"/"Block"/…), for the
 // About wake diagnostic.
 const char* sceneName(SceneId id);
@@ -71,11 +73,11 @@ void showToday();       // M3: real Today scene (agenda/reminders/weather card)
 void showReader();      // R1 EPUB reader (resumes the last book; book list on BACK)
 void showWorkout();     // Workout: set-by-set exercise tracker synced from iPhone
 void showFileTransfer();           // R2: Wi-Fi File Transfer scene (Idle menu)
-void showFileTransferAutoStart();  // R2: same, but bring Wi-Fi up immediately (BLE transfer.start)
+void showFileTransferAutoStart();        // R2: same, but bring Wi-Fi up immediately (BLE transfer.start)
+void showFileTransferAutoStartDirect();  // W2: start directly in hotspot mode
 // R2: BLE "transfer.stop" — ack + restart when the transfer scene is active
-// (restart is the clean Wi-Fi teardown); no-op on any other scene.
 void stopFileTransferIfActive();
-
+void showWifi();
 void showGames();       // Games: pick a pastime, then daily or a free-play level
 // The three pastimes. `daily` selects today's board (pack index/seed derived
 // from the day serial, tier forced to games::kDailyTier and `tier` ignored);

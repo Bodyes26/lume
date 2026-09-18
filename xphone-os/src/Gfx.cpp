@@ -13,8 +13,47 @@ bool Gfx::begin() {
   return _fb != nullptr && _w > 0 && _h > 0;
 }
 
+bool Gfx::releaseFramebufferForSync() {
+  _fb = nullptr;  // invalidate the borrowed pointer BEFORE the SDK frees it
+  if (_d.releaseFramebufferForSync()) return true;
+  _fb = _d.getFrameBuffer();  // unsupported/static path keeps normal drawing
+  return false;
+}
+
+bool Gfx::restoreFramebufferAfterSync() {
+  if (!_d.restoreFramebufferAfterSync()) return false;
+  _fb = _d.getFrameBuffer();
+  return _fb != nullptr;
+}
+
+// Swap the logical frame. Landscape == the panel's native orientation, so
+// the transform becomes the identity; portrait keeps the 90 CW rotation.
+// Callers must repaint after switching (every layout depends on w/h).
+void Gfx::setOrientation(const Orient o) {
+  if (o == _orient) return;
+  _orient = o;
+  const int nativeW = _d.getDisplayWidth();
+  const int nativeH = _d.getDisplayHeight();
+  if (o == Orient::Landscape) {
+    _w = nativeW;
+    _h = nativeH;
+  } else {
+    _w = nativeH;
+    _h = nativeW;
+  }
+}
+
 void Gfx::drawPixel(const int x, const int y, const bool black) {
+  if (!_fb) return;
   if (x < 0 || y < 0 || x >= _w || y >= _h) return;
+  if (_orient == Orient::Landscape) {
+    // Native orientation: logical == physical, no rotation.
+    const uint32_t idx = static_cast<uint32_t>(y) * _wBytes + (x >> 3);
+    const uint8_t mask = 0x80 >> (x & 7);
+    if (black) _fb[idx] &= ~mask;
+    else _fb[idx] |= mask;
+    return;
+  }
   // Logical portrait -> native panel: 90 degrees CLOCKWISE, chirality matching
   // CrossPoint's default GfxRenderer::Portrait (x4-os GfxRenderer.cpp
   // rotateCoordinates(): phyX = y; phyY = panelHeight - 1 - x, where native
@@ -65,6 +104,7 @@ void Gfx::drawLine(int x0, int y0, const int x1, const int y1, const int thickne
 }
 
 void Gfx::fillRect(const int x, const int y, const int w, const int h, const bool black) {
+  if (!_fb) return;
   // M2.1a byte-run fill. Transform is IDENTICAL to drawPixel (phyX = y,
   // phyY = _w - 1 - x): one logical COLUMN is one native framebuffer row, and
   // the logical-Y run inside it is the native bit/byte axis — so each column
@@ -77,6 +117,37 @@ void Gfx::fillRect(const int x, const int y, const int w, const int h, const boo
   const int x1 = (x + w > _w) ? _w : x + w;  // exclusive
   const int y1 = (y + h > _h) ? _h : y + h;  // exclusive
   if (x0 >= x1 || y0 >= y1) return;
+
+  if (_orient == Orient::Landscape) {
+    // Native orientation: a logical ROW is a framebuffer row and the
+    // logical-X run is the bit axis — the same head/middle/tail masking,
+    // with the roles of x and y exchanged.
+    const int firstByteL = x0 >> 3;
+    const int lastByteL = (x1 - 1) >> 3;
+    const uint8_t headL = static_cast<uint8_t>(0xFF >> (x0 & 7));
+    const uint8_t tailL = static_cast<uint8_t>(0xFF << (7 - ((x1 - 1) & 7)));
+    for (int row_y = y0; row_y < y1; row_y++) {
+      uint8_t* row = _fb + static_cast<uint32_t>(row_y) * _wBytes;
+      if (firstByteL == lastByteL) {
+        const uint8_t m = headL & tailL;
+        if (black) row[firstByteL] &= static_cast<uint8_t>(~m);
+        else row[firstByteL] |= m;
+        continue;
+      }
+      if (black) {
+        row[firstByteL] &= static_cast<uint8_t>(~headL);
+        if (lastByteL - firstByteL > 1)
+          memset(row + firstByteL + 1, 0x00, lastByteL - firstByteL - 1);
+        row[lastByteL] &= static_cast<uint8_t>(~tailL);
+      } else {
+        row[firstByteL] |= headL;
+        if (lastByteL - firstByteL > 1)
+          memset(row + firstByteL + 1, 0xFF, lastByteL - firstByteL - 1);
+        row[lastByteL] |= tailL;
+      }
+    }
+    return;
+  }
 
   const int px0 = y0;      // native X of the run start (phyX = y)
   const int px1 = y1 - 1;  // native X of the run end, inclusive
@@ -184,6 +255,16 @@ uint32_t Gfx::nextCodepoint(const char** s) {
   return cp;
 }
 
+bool Gfx::canRender(const XpFont& f, const char* text) const {
+  if (!text) return false;
+  uint32_t cp;
+  while ((cp = nextCodepoint(&text)) != 0) {
+    if (cp == ' ') continue;
+    if (!findGlyph(f, cp)) return false;
+  }
+  return true;
+}
+
 const EpdGlyph* Gfx::findGlyph(const XpFont& f, const uint32_t cp) const {
   // Linear scan over the interval table (~51 entries for the Ubuntu fonts) —
   // sorted ascending by `first`, same data GfxRenderer binary-searches.
@@ -196,6 +277,7 @@ const EpdGlyph* Gfx::findGlyph(const XpFont& f, const uint32_t cp) const {
 }
 
 void Gfx::blitGlyph(const XpFont& f, const EpdGlyph* g, const int penX, const int lineTopY, const bool black) {
+  if (!_fb) return;
   // Same packing as GfxRenderer renderCharImpl (1bpp branch): MSB-first bits,
   // pixelPosition = glyphY * width + glyphX, no per-row padding.
   //
@@ -212,6 +294,37 @@ void Gfx::blitGlyph(const XpFont& f, const EpdGlyph* g, const int penX, const in
   const int gyStart = (y0 < 0) ? -y0 : 0;                          // clip top
   const int gyEnd = (y0 + g->height > _h) ? _h - y0 : g->height;   // clip bottom
   if (gyStart >= gyEnd) return;
+
+  if (_orient == Orient::Landscape) {
+    // Native orientation: a glyph ROW is a framebuffer row, and the glyph
+    // bitmap is already row-major MSB-first — so the source bits coalesce
+    // along the same axis the framebuffer packs.
+    for (int gy = gyStart; gy < gyEnd; gy++) {
+      uint8_t* row = _fb + static_cast<uint32_t>(y0 + gy) * _wBytes;
+      int gx = 0;
+      while (gx < gw) {
+        const int lx = x0 + gx;
+        if (lx < 0) { gx++; continue; }
+        if (lx >= _w) break;
+        const int bit = lx & 7;
+        int chunk = 8 - bit;                       // stay inside one byte
+        if (chunk > gw - gx) chunk = gw - gx;
+        if (lx + chunk > _w) chunk = _w - lx;
+        uint8_t m = 0;
+        int pp = gy * gw + gx;
+        for (int k = 0; k < chunk; k++, pp++) {
+          if ((bmp[pp >> 3] >> (7 - (pp & 7))) & 1) m |= static_cast<uint8_t>(0x80 >> (bit + k));
+        }
+        if (m) {
+          if (black) row[lx >> 3] &= static_cast<uint8_t>(~m);
+          else row[lx >> 3] |= m;
+        }
+        gx += chunk;
+      }
+    }
+    return;
+  }
+
   for (int gx = 0; gx < gw; gx++) {
     const int lx = x0 + gx;
     if (lx < 0 || lx >= _w) continue;  // clip left/right
@@ -234,6 +347,70 @@ void Gfx::blitGlyph(const XpFont& f, const EpdGlyph* g, const int penX, const in
       gy += chunk;
     }
   }
+}
+
+// Nearest-neighbor integer upscale of the 1-bit face: each source pixel
+// becomes a scale x scale block, stamped through fillRect (which already
+// coalesces byte runs). Exact, so the result is crisp — no resampling.
+void Gfx::drawTextScaled(const XpFont& f, const int x, const int y, const char* text,
+                         const int scale, const bool black) {
+  if (!text || scale < 1) return;
+  if (scale == 1) {
+    drawText(f, x, y, text, black);
+    return;
+  }
+  int32_t advFp = 0;
+  uint32_t cp;
+  while ((cp = nextCodepoint(&text)) != 0) {
+    const EpdGlyph* g = findGlyph(f, cp);
+    if (!g) g = findGlyph(f, '?');
+    if (!g) continue;
+    const int penX = x + fp4::toPixel(advFp);
+    const uint8_t* bmp = f.bitmap + g->dataOffset;
+    const int gx0 = penX + g->left * scale;
+    const int gy0 = y + (f.ascender - g->top) * scale;
+    for (int gy = 0; gy < g->height; gy++) {
+      // Coalesce horizontal runs of set pixels into one fillRect.
+      int gx = 0;
+      while (gx < g->width) {
+        int pp = gy * g->width + gx;
+        if (!((bmp[pp >> 3] >> (7 - (pp & 7))) & 1)) {
+          gx++;
+          continue;
+        }
+        int run = 1;
+        while (gx + run < g->width) {
+          const int q = gy * g->width + gx + run;
+          if (!((bmp[q >> 3] >> (7 - (q & 7))) & 1)) break;
+          run++;
+        }
+        fillRect(gx0 + gx * scale, gy0 + gy * scale, run * scale, scale, black);
+        gx += run;
+      }
+    }
+    advFp += g->advanceX * scale;
+  }
+}
+
+void Gfx::drawTextScaledCentered(const XpFont& f, const int cx, const int y, const char* text,
+                                 const int scale, const bool black) {
+  drawTextScaled(f, cx - textWidthScaled(f, text, scale) / 2, y, text, scale, black);
+}
+
+int Gfx::capHeight(const XpFont& f) const {
+  const EpdGlyph* g = findGlyph(f, 'H');
+  return g ? g->height : (f.ascender * 3) / 4;
+}
+
+int Gfx::capTopOffset(const XpFont& f) const {
+  // drawText's baseline is y + ascender and a glyph's top pixel sits
+  // g->top above it, so the cap starts ascender - top below y.
+  const EpdGlyph* g = findGlyph(f, 'H');
+  return g ? (f.ascender - g->top) : 0;
+}
+
+int Gfx::textWidthScaled(const XpFont& f, const char* text, const int scale) const {
+  return textWidth(f, text) * (scale < 1 ? 1 : scale);
 }
 
 int Gfx::textWidth(const XpFont& f, const char* text) const {
@@ -271,6 +448,16 @@ void Gfx::drawTextCentered(const XpFont& f, const int cx, const int y, const cha
 // '?' in drawText, same as every other text path.
 int Gfx::drawTextWrapped(const XpFont& f, const int x, int y, const char* text, const int maxWidth,
                          const int maxLines, const bool black) {
+  return wrapText(f, x, y, text, maxWidth, maxLines, black, /*draw=*/true);
+}
+
+int Gfx::countWrappedLines(const XpFont& f, const char* text, const int maxWidth, const int maxLines) {
+  return wrapText(f, 0, 0, text, maxWidth, maxLines, true, /*draw=*/false);
+}
+
+// The one wrap walker: drawTextWrapped paints, countWrappedLines only counts.
+int Gfx::wrapText(const XpFont& f, const int x, int y, const char* text, const int maxWidth,
+                  const int maxLines, const bool black, const bool draw) {
   if (!text || !text[0] || maxWidth <= 0 || maxLines <= 0) return 0;
 
   int lines = 0;
@@ -341,7 +528,7 @@ int Gfx::drawTextWrapped(const XpFont& f, const int x, int y, const char* text, 
       snprintf(line, sizeof(line), "%s", probe);
     }
 
-    drawText(f, x, y, line, black);
+    if (draw) drawText(f, x, y, line, black);
     y += f.lineAdvance;
     lines++;
     pos = resume;
@@ -368,8 +555,24 @@ Gfx::FlushTier Gfx::flushWindow(const int x, const int y, const int w, const int
   // the UC8253 PTL window (0x90) has 8px horizontal resolution and the
   // SSD1677 displayWindow path requires x%8 == 0 && w%8 == 0 (silent no-op
   // otherwise, Ssd1677Driver.cpp:340-341).
-  const int nativeW = _d.getDisplayWidth();   // == logical _h
-  const int nativeH = _d.getDisplayHeight();  // == logical _w
+  const int nativeW = _d.getDisplayWidth();
+  const int nativeH = _d.getDisplayHeight();
+  if (_orient == Orient::Landscape) {
+    // Identity transform: the logical rect IS the native window, with the
+    // same byte-alignment expansion on native X.
+    int lx0 = x0 & ~7;
+    int lx1 = (x1 - 1) | 7;
+    if (lx1 >= nativeW) lx1 = nativeW - 1;
+    const int lw = lx1 - lx0 + 1;
+    const int lh = y1 - y0;
+    if (lx0 < 0 || lw <= 0 || y0 < 0 || y0 + lh > nativeH) {
+      _d.displayBuffer(EInkDisplay::FAST_REFRESH);
+      return FlushTier::Fast;
+    }
+    _d.displayWindow(static_cast<uint16_t>(lx0), static_cast<uint16_t>(y0),
+                     static_cast<uint16_t>(lw), static_cast<uint16_t>(lh));
+    return FlushTier::Partial;
+  }
   int nx0 = y0 & ~7;
   int nx1 = (y1 - 1) | 7;
   if (nx1 >= nativeW) nx1 = nativeW - 1;  // panel widths are /8 => stays aligned
