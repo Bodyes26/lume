@@ -56,9 +56,11 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(HalFile& file) {
   // Word count
   serialization::readPod(file, wc);
 
-  // Sanity check: prevent allocation of unreasonably large vectors (max 10000 words per block)
-  if (wc > 10000) {
-    LOG_ERR("TXB", "Deserialization failed: word count %u exceeds maximum", wc);
+  // Sanity check: prevent allocation of unreasonably large vectors (max 512 words per block).
+  // A corrupted cache with a larger word count would otherwise abort with OOM on ESP32-C3.
+  constexpr uint16_t kMaxWordsPerBlock = 512;
+  if (wc > kMaxWordsPerBlock) {
+    LOG_ERR("TXB", "Deserialization failed: word count %u exceeds maximum (%u)", wc, kMaxWordsPerBlock);
     return nullptr;
   }
 

@@ -117,21 +117,15 @@ void LauncherScene::handleInput(Input& in) {
   if (in.wasPressed(Btn::Up)) moveSelection(0, -1);
   if (in.wasPressed(Btn::Down)) moveSelection(0, +1);
   if (in.wasPressed(Btn::Confirm)) {
-    const char* app = kApps[_sel];
-    if (strcmp(app, L10N("Block", "Focus")) == 0) {
-      showBlock();
-    } else if (strcmp(app, L10N("Reminders", "Promemoria")) == 0) {
-      showReminders();
-    } else if (strcmp(app, L10N("Today", "Oggi")) == 0) {
-      showToday();
-    } else if (strcmp(app, L10N("Notifications", "Notifiche")) == 0) {
-      showNotifications();
-    } else if (strcmp(app, L10N("Read", "Leggi")) == 0) {
-      showReader();
-    } else if (strcmp(app, L10N("Workout", "Allenamento")) == 0) {
-      showWorkout();
-    } else if (strcmp(app, L10N("Games", "Giochi")) == 0) {
-      showGames();
+    switch (static_cast<AppId>(_sel)) {
+      case AppId::Today:         showToday(); break;
+      case AppId::Notifications: showNotifications(); break;
+      case AppId::Reminders:     showReminders(); break;
+      case AppId::Block:         showBlock(); break;
+      case AppId::Read:          showReader(); break;
+      case AppId::Workout:       showWorkout(); break;
+      case AppId::Games:         showGames(); break;
+      default: break;
     }
   }
   if (in.wasPressed(Btn::Back)) showSettings();

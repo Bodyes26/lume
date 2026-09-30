@@ -306,9 +306,10 @@ struct __attribute__((packed)) SelectEntry {
 };
 static_assert(sizeof(SelectEntry) == 32, "SelectEntry must be 32 bytes");
 
-constexpr uint32_t OTA_IMG_NEW = 0;      // ESP_OTA_IMG_NEW
-constexpr uint32_t OTA_IMG_INVALID = 3;  // ESP_OTA_IMG_INVALID
-constexpr uint32_t OTA_IMG_ABORTED = 4;  // ESP_OTA_IMG_ABORTED
+constexpr uint32_t OTA_IMG_NEW = 0;             // ESP_OTA_IMG_NEW
+constexpr uint32_t OTA_IMG_PENDING_VERIFY = 1;    // ESP_OTA_IMG_PENDING_VERIFY
+constexpr uint32_t OTA_IMG_INVALID = 3;         // ESP_OTA_IMG_INVALID
+constexpr uint32_t OTA_IMG_ABORTED = 4;         // ESP_OTA_IMG_ABORTED
 
 uint32_t seqCrc(uint32_t seq) {
   // CRC32-LE over the 4-byte ota_seq, init UINT32_MAX. Matches IDF.
@@ -362,7 +363,7 @@ bool otadataSwitchTo(const esp_partition_t* dest) {
   SelectEntry next = {};
   next.ota_seq = newSeq;
   std::memset(next.seq_label, 0xFF, sizeof(next.seq_label));
-  next.ota_state = OTA_IMG_NEW;
+  next.ota_state = OTA_IMG_PENDING_VERIFY;
   next.crc = seqCrc(next.ota_seq);
 
   const int targetSlot = (activeIdx == 0) ? 1 : 0;

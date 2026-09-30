@@ -8,4 +8,5 @@ ios/.build/
 ios/.build-device/
 ios/.build-simulator/
 ios/.derivedData/
+ios/build/
 **/xcuserdata/

@@ -22,6 +22,8 @@
 #include <InflateReader.h>
 #include <SPI.h>
 
+#include <esp_ota_ops.h>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -333,6 +335,17 @@ static void boot() {
   Serial.printf("[xphone-os] cpu: setCpuFrequencyMhz(%d) %s, now %lu MHz\n", XP_CPU_MHZ,
                 cpuOk ? "ok" : "FAILED", static_cast<unsigned long>(getCpuFrequencyMhz()));
 #endif
+
+  // OTA verification: if running a newly flashed image in PENDING_VERIFY state,
+  // confirm that boot completed successfully and cancel rollback.
+  esp_ota_img_states_t otaState;
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (running && esp_ota_get_state_partition(running, &otaState) == ESP_OK) {
+    if (otaState == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      Serial.println("[lume] ota: firmware validated, rollback cancelled");
+    }
+  }
 }
 
 void setup() { boot(); }
@@ -691,6 +704,7 @@ void quietRestartToScene(uint32_t sceneId) {
   Serial.printf("[lume] quiet restart to scene %lu (free=%u largest=%u)\n",
                 static_cast<unsigned long>(sceneId), ESP.getFreeHeap(),
                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  Sleep::persistStoresForRestart();
   Sleep::armRestoreScene(sceneId);
   SCENES.waitFlushIdle();
   esp_restart();

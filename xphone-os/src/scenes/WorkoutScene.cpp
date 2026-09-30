@@ -21,17 +21,15 @@ constexpr int kMaxPips = 12;  // sets <= 12 draw a pip bar; beyond that, numeric
 // Coalesced workout.set send: five rapid + presses become one packet carrying
 // the final absolute count. File-scope (not members) so Sleep.cpp can flush
 // through the static hook without a scene pointer. Main-loop only.
-int s_pendingIdx = -1;
+char s_pendingId[CompanionProtocol::MAX_ID_CHARS + 1] = {0};
+int s_pendingDone = 0;
 uint32_t s_pendingDueMs = 0;
 constexpr uint32_t kSendQuietMs = 400;
 
 void sendPendingNow() {
-  if (s_pendingIdx < 0) return;
-  WorkoutStore::Item item;
-  if (WORKOUT_STORE.get(static_cast<std::size_t>(s_pendingIdx), item) && item.id[0] != '\0') {
-    COMPANION_BLE.sendWorkoutSet(item.id, item.done);  // absolute — idempotent
-  }
-  s_pendingIdx = -1;
+  if (s_pendingId[0] == '\0') return;
+  COMPANION_BLE.sendWorkoutSet(s_pendingId, s_pendingDone);  // absolute — idempotent
+  s_pendingId[0] = '\0';
 }
 
 // Width-clipping copy (same helper as PrioritiesScene).
@@ -111,9 +109,12 @@ XpRect WorkoutScene::listRect() const {
 void WorkoutScene::bumpSelected(const int delta) {
   const int next = WORKOUT_STORE.bumpDone(static_cast<std::size_t>(_sel), delta);
   if (next < 0) return;  // clamp edge or bad index — nothing changed
+  WorkoutStore::Item item;
+  if (!WORKOUT_STORE.get(static_cast<std::size_t>(_sel), item) || item.id[0] == '\0') return;
   // Different exercise pending? Flush it first so its count isn't lost.
-  if (s_pendingIdx >= 0 && s_pendingIdx != _sel) sendPendingNow();
-  s_pendingIdx = _sel;
+  if (s_pendingId[0] != '\0' && strcmp(s_pendingId, item.id) != 0) sendPendingNow();
+  snprintf(s_pendingId, sizeof(s_pendingId), "%s", item.id);
+  s_pendingDone = next;
   s_pendingDueMs = millis() + kSendQuietMs;
   _localMsg = "";
   markDirty(listRect());
@@ -121,7 +122,7 @@ void WorkoutScene::bumpSelected(const int delta) {
 
 void WorkoutScene::handleInput(Input& in) {
   // Quiet-window expiry for the coalesced send (runs on the input tick).
-  if (s_pendingIdx >= 0 && static_cast<int32_t>(millis() - s_pendingDueMs) >= 0) {
+  if (s_pendingId[0] != '\0' && static_cast<int32_t>(millis() - s_pendingDueMs) >= 0) {
     sendPendingNow();
   }
 

@@ -237,11 +237,18 @@ flowe_resume::Upload<flowe_resume::SdStorage, flowe_resume::Sha256> gResumeUploa
 
 bool FileTransferServer::recoverUploads() { return recoverUploadPublication(); }
 
-// True when no token is set (legacy phone) or the request carries it.
+// Requires a valid non-empty session token established over BLE.
+// Constant-time comparison to prevent timing leak attacks.
 bool FileTransferServer::tokenOk() {
-  if (gSessionToken[0] == '\0') return true;
+  if (gSessionToken[0] == '\0') return false;
   if (!_server->hasHeader("X-Flowe-Token")) return false;
-  return _server->header("X-Flowe-Token") == gSessionToken;
+  const String headerToken = _server->header("X-Flowe-Token");
+  if (headerToken.length() != strlen(gSessionToken)) return false;
+  uint8_t diff = 0;
+  for (size_t i = 0; i < headerToken.length(); ++i) {
+    diff |= (headerToken[i] ^ gSessionToken[i]);
+  }
+  return diff == 0;
 }
 
 // A phone can change networks after discovery, where the same IP may name
@@ -586,7 +593,7 @@ bool FileTransferServer::queryPath(char* dst, const size_t dstSize, const bool r
 static const char kGuestPage[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Flowe bookshelf</title>
+<title>Lume bookshelf</title>
 <style>
 body{font:16px/1.5 Georgia,serif;background:#F2F1EF;color:#2C2C29;margin:0;padding:24px}
 h1{font-size:22px;font-weight:600;margin:0 0 4px}
@@ -602,8 +609,8 @@ li span.sz{color:#3C3C43;opacity:.55;font-size:13px}
 input[type=file]{display:none}
 label{color:#769071;font-weight:600;cursor:pointer}
 </style></head><body>
-<h1>Flowe bookshelf</h1>
-<p class="sub">Drop an EPUB here and it lands on the device. Use the Flowe app for everything else.</p>
+<h1>Lume bookshelf</h1>
+<p class="sub">Drop an EPUB here and it lands on the device. Use the Lume app for everything else.</p>
 <div id="drop">Drop a book here or <label for="f">choose a file</label>
 <input id="f" type="file" accept=".epub" multiple></div>
 <div id="bar"><div id="fill"></div></div>

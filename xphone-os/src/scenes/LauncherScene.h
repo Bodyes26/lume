@@ -16,6 +16,17 @@ class LauncherScene : public Scene {
   const char* const* softKeys() const override;  // [gear] / OPEN / PREV / NEXT
   uint8_t softKeyIconMask() const override { return 0x01; }  // Settings = gear tab
 
+  enum class AppId : uint8_t {
+    Today = 0,
+    Notifications,
+    Reminders,
+    Block,
+    Read,
+    Workout,
+    Games,
+    Count
+  };
+
   static constexpr int COLS = 2;
   static constexpr int ROWS = 3;
   static constexpr int PAGE_SIZE = COLS * ROWS;  // 6

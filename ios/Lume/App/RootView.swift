@@ -64,7 +64,11 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             bluetooth.start()
-            Task { await today.refreshIfAuthorized() }
+            Task {
+                async let refreshToday: () = today.refreshIfAuthorized()
+                async let refreshReminders: () = reminders.refreshIfAuthorized()
+                _ = await (refreshToday, refreshReminders)
+            }
         }
         .sensoryFeedback(.success, trigger: bluetooth.phase.isReady)
     }

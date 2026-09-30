@@ -15,6 +15,10 @@ static_assert(sizeof(WorkoutStore::Item::name) == CompanionProtocol::MAX_WORKOUT
               "Item::name must fit MAX_WORKOUT_NAME_CHARS + NUL");
 
 void WorkoutStore::updateFromCard(const CompanionCardState& card) {
+  // Workout cards are single-part in the current protocol (maximum 16 items).
+  // Reject multi-part slices to prevent overwriting with partial lists.
+  if (card.parts > 1 && card.part > 0) return;
+
   // Same-day stale-snapshot guard: sets counted on the device while the phone
   // was away must not be regressed by a snapshot the phone built before it
   // heard about them. When the incoming card is for the SAME date, done takes

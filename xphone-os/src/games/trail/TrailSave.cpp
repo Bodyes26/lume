@@ -1,5 +1,6 @@
 #include "TrailSave.h"
 
+#include <cstddef>
 #include <Preferences.h>
 #include <cstdio>
 
@@ -37,7 +38,7 @@ bool TrailSaveManager::load(uint32_t storyHash, TrailSave& out) {
   prefs.end();
 
   // Validate checksum
-  uint16_t expected = crc16(reinterpret_cast<const uint8_t*>(&temp), sizeof(TrailSave) - sizeof(uint16_t));
+  uint16_t expected = crc16(reinterpret_cast<const uint8_t*>(&temp), offsetof(TrailSave, checksum));
   if (temp.checksum != expected || temp.storyHash != storyHash) {
     return false;
   }
@@ -48,7 +49,7 @@ bool TrailSaveManager::load(uint32_t storyHash, TrailSave& out) {
 
 bool TrailSaveManager::save(const TrailSave& record) {
   TrailSave toWrite = record;
-  toWrite.checksum = crc16(reinterpret_cast<const uint8_t*>(&toWrite), sizeof(TrailSave) - sizeof(uint16_t));
+  toWrite.checksum = crc16(reinterpret_cast<const uint8_t*>(&toWrite), offsetof(TrailSave, checksum));
 
   char key[16];
   makeKey(toWrite.storyHash, key);

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <esp_attr.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -35,7 +36,7 @@ RTC_NOINIT_ATTR Record gRecord;
 // flip mid-way sees the previous name, which is still true and still useful.
 char gStageBuf[2][kStageCap];
 volatile uint8_t gStageIdx = 0;
-volatile uint32_t gBeat = 0;
+std::atomic<uint32_t> gBeat{0};
 volatile uint32_t gWorstMs = 0;
 bool gStarted = false;
 
@@ -47,11 +48,11 @@ StaticTask_t gTcb;
 StackType_t gStack[2560];
 
 void watchTask(void*) {
-  uint32_t lastBeat = gBeat;
+  uint32_t lastBeat = gBeat.load(std::memory_order_relaxed);
   uint32_t movedAt = millis();
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(500));
-    const uint32_t beat = gBeat;
+    const uint32_t beat = gBeat.load(std::memory_order_relaxed);
     const uint32_t now = millis();
     if (beat != lastBeat) {
       lastBeat = beat;
@@ -83,7 +84,7 @@ void begin() {
                     gStack, &gTcb);
 }
 
-void beat() { gBeat++; }
+void beat() { gBeat.fetch_add(1, std::memory_order_relaxed); }
 
 void stage(const char* what) {
   if (!what) return;

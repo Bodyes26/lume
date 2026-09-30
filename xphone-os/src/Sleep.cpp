@@ -494,6 +494,83 @@ void imuSleep() {
 }  // namespace
 
 namespace Sleep {
+void persistStoresForRestart() {
+  Preferences prefs;
+  if (!prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+    Serial.println("[xphone-os] sleep: NVS open failed for store persistence");
+    return;
+  }
+  // Last Today / Priorities snapshot JSON so the dormant/wake render shows
+  // cached data instead of the blank "Syncing" screen (seeded at boot).
+  const std::string& todayJson = COMPANION_BLE.getLastTodayCard();
+  if (!todayJson.empty()) prefs.putString(kTodayCardKey, todayJson.c_str());
+
+  // Reminders: serialized from the STORE, not the last phone card — a
+  // multi-part snapshot's final card only carries the tail slice, so the
+  // raw payload no longer represents the whole list.
+  if (REMINDERS_STORE.count() > 0) {
+    JsonDocument doc;
+    doc["kind"] = "reminders.snapshot";
+    doc["id"] = "rem-persist";
+    doc["body"] = REMINDERS_STORE.syncLine();
+    doc["gen"] = REMINDERS_STORE.generation();
+    JsonArray lists = doc["reminderLists"].to<JsonArray>();
+    for (std::size_t i = 0; i < REMINDERS_STORE.listCount(); i++) {
+      JsonArray row = lists.add<JsonArray>();
+      row.add(i);
+      row.add(REMINDERS_STORE.listName(i));
+    }
+    JsonArray items = doc["reminderItems"].to<JsonArray>();
+    RemindersStore::Item it;
+    for (std::size_t i = 0; REMINDERS_STORE.get(i, it); i++) {
+      JsonArray row = items.add<JsonArray>();
+      row.add(it.handle);
+      row.add(it.list);
+      row.add(it.title);
+      row.add(it.due);
+    }
+    String out;
+    serializeJson(doc, out);
+    prefs.putString(kRemCardKey, out);
+  }
+
+  // Workout snapshot: serialized from the STORE, not the last phone card —
+  // sets counted while the phone was away live only in the store, and the
+  // wake seed must not regress them.
+  if (WORKOUT_STORE.count() > 0) {
+    JsonDocument doc;
+    doc["kind"] = "workout.snapshot";
+    doc["id"] = "workout-persist";
+    doc["workoutDate"] = WORKOUT_STORE.date();
+    JsonArray items = doc["workoutItems"].to<JsonArray>();
+    WorkoutStore::Item it;
+    for (std::size_t i = 0; WORKOUT_STORE.get(i, it); i++) {
+      JsonArray row = items.add<JsonArray>();
+      row.add(it.id);
+      row.add(it.name);
+      row.add(it.sets);
+      row.add(it.done);
+    }
+    String out;
+    serializeJson(doc, out);
+    prefs.putString(kWorkoutCardKey, out);
+  }
+
+  // Newest notifications (shared persistence scratch, declared above).
+  {
+    const std::size_t n = NOTIFICATION_STORE.snapshot(gNotifScratch, sizeof(gNotifScratch));
+    if (n > 0) prefs.putBytes(kNotifStoreKey, gNotifScratch, n);
+    else prefs.remove(kNotifStoreKey);  // do not resurrect a list cleared since the last sleep
+
+    // Individual-clear tombstones are a separate raw blob so changing the
+    // notification snapshot policy cannot discard the replay retry memory.
+    const std::size_t tombN = NOTIFICATION_STORE.tombstoneSnapshot(gTombScratch, sizeof(gTombScratch));
+    if (tombN > 0) prefs.putBytes(kNotifTombKey, gTombScratch, tombN);
+    else prefs.remove(kNotifTombKey);
+  }
+  prefs.end();
+}
+
 
 void sleepNow(Gfx& gfx, Input& input) {
   // M5 Phase 1/2: the flush worker must be idle before this function's direct
@@ -546,74 +623,8 @@ void sleepNow(Gfx& gfx, Input& input) {
       prefs.putInt(kBlkStreakKey, blk.streak);
       prefs.putInt(kBlkTotalKey, blk.total);
 
-      // Last Today / Priorities snapshot JSON so the dormant/wake render shows
-      // cached data instead of the blank "Syncing" screen (seeded at boot).
-      const std::string& todayJson = COMPANION_BLE.getLastTodayCard();
-      if (!todayJson.empty()) prefs.putString(kTodayCardKey, todayJson.c_str());
-      // Reminders: serialized from the STORE, not the last phone card — a
-      // multi-part snapshot's final card only carries the tail slice, so the
-      // raw payload no longer represents the whole list.
-      if (REMINDERS_STORE.count() > 0) {
-        JsonDocument doc;
-        doc["kind"] = "reminders.snapshot";
-        doc["id"] = "rem-persist";
-        doc["body"] = REMINDERS_STORE.syncLine();
-        doc["gen"] = REMINDERS_STORE.generation();
-        JsonArray lists = doc["reminderLists"].to<JsonArray>();
-        for (std::size_t i = 0; i < REMINDERS_STORE.listCount(); i++) {
-          JsonArray row = lists.add<JsonArray>();
-          row.add(i);
-          row.add(REMINDERS_STORE.listName(i));
-        }
-        JsonArray items = doc["reminderItems"].to<JsonArray>();
-        RemindersStore::Item it;
-        for (std::size_t i = 0; REMINDERS_STORE.get(i, it); i++) {
-          JsonArray row = items.add<JsonArray>();
-          row.add(it.handle);
-          row.add(it.list);
-          row.add(it.title);
-          row.add(it.due);
-        }
-        String out;
-        serializeJson(doc, out);
-        prefs.putString(kRemCardKey, out);
-      }
-
-      // Workout snapshot: serialized from the STORE, not the last phone card —
-      // sets counted while the phone was away live only in the store, and the
-      // wake seed must not regress them.
-      if (WORKOUT_STORE.count() > 0) {
-        JsonDocument doc;
-        doc["kind"] = "workout.snapshot";
-        doc["id"] = "workout-persist";
-        doc["workoutDate"] = WORKOUT_STORE.date();
-        JsonArray items = doc["workoutItems"].to<JsonArray>();
-        WorkoutStore::Item it;
-        for (std::size_t i = 0; WORKOUT_STORE.get(i, it); i++) {
-          JsonArray row = items.add<JsonArray>();
-          row.add(it.id);
-          row.add(it.name);
-          row.add(it.sets);
-          row.add(it.done);
-        }
-        String out;
-        serializeJson(doc, out);
-        prefs.putString(kWorkoutCardKey, out);
-      }
-
-      // Newest notifications (shared persistence scratch, declared above).
-      {
-        const std::size_t n = NOTIFICATION_STORE.snapshot(gNotifScratch, sizeof(gNotifScratch));
-        if (n > 0) prefs.putBytes(kNotifStoreKey, gNotifScratch, n);
-        else prefs.remove(kNotifStoreKey);  // do not resurrect a list cleared since the last sleep
-
-        // Individual-clear tombstones are a separate raw blob so changing the
-        // notification snapshot policy cannot discard the replay retry memory.
-        const std::size_t tombN = NOTIFICATION_STORE.tombstoneSnapshot(gTombScratch, sizeof(gTombScratch));
-        if (tombN > 0) prefs.putBytes(kNotifTombKey, gTombScratch, tombN);
-        else prefs.remove(kNotifTombKey);
-      }
       prefs.end();
+      persistStoresForRestart();
     } else {
       Serial.println("[xphone-os] sleep: NVS open failed; scene restore disabled this cycle");
     }

@@ -18,6 +18,9 @@ static_assert(sizeof(TodayStore::Item::subtitle) == CompanionProtocol::MAX_TODAY
               "subtitle field != protocol");
 
 void TodayStore::updateFromCard(const CompanionCardState& card) {
+  // Today cards are strictly single-part (maximum 6 items, bounded by TodayProjection).
+  // Reject multi-part slices to prevent corrupted partial state.
+  if (card.parts > 1 && card.part > 0) return;
   std::size_t n = card.todayItemCount;
   if (n > CAPACITY) n = CAPACITY;
   for (std::size_t i = 0; i < n; i++) {

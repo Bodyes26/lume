@@ -53,4 +53,8 @@ for locale in IT EN; do
   c++ $CXXFLAGS $flag -Istubs/sleep_config trail_engine_test.cpp -o "$OUT/trail_engine_$locale"
   printf '%s ' "$locale"
   "$OUT/trail_engine_$locale"
+
+  c++ $CXXFLAGS $flag -Irender/stubs -I../../lib/EpdFontCore -I../../lib/Utf8 accent_test.cpp "$SRC/Gfx.cpp" "$SRC/Fonts.cpp" ../../lib/Utf8/Utf8.cpp -o "$OUT/accent_$locale"
+  printf '%s ' "$locale"
+  "$OUT/accent_$locale"
 done

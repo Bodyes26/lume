@@ -1,3 +1,4 @@
+#include <cstddef>
 #include "TrailEngine.h"
 
 namespace trail {
@@ -55,8 +56,8 @@ bool TrailEngine::restoreGame(const TrailSave& save) {
 
 void TrailEngine::createSave(TrailSave& out) const {
   out = _save;
-  // Compute checksum over first 126 bytes
-  out.checksum = crc16(reinterpret_cast<const uint8_t*>(&out), sizeof(TrailSave) - sizeof(uint16_t));
+  // Compute checksum over preceding bytes before checksum field
+  out.checksum = crc16(reinterpret_cast<const uint8_t*>(&out), offsetof(TrailSave, checksum));
 }
 
 bool TrailEngine::loadChapter(int chapterIndex) {

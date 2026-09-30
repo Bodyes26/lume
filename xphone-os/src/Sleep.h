@@ -39,6 +39,12 @@ namespace Sleep {
 // Never returns: ends in esp_deep_sleep_start(). Call from the main loop only
 // (draws with gfx, waits on input for the power-button release).
 [[noreturn]] void sleepNow(Gfx& gfx, Input& input);
+// Write the companion stores (Today, Reminders, Workout, notifications) to
+// NVS now, so a restart re-seeds the CURRENT lists. sleepNow does this on the
+// way to OFF; the quiet restart (main.cpp quietRestartToScene) must do it too,
+// or the boot re-seeds whatever the last power-off left.
+void persistStoresForRestart();
+
 
 // M4.2 last-scene restore. sleepNow() persists the on-glass scene id
 // (AppScenes.h gCurrentSceneId) in NVS flash (Arduino Preferences), which

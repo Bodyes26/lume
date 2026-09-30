@@ -41,6 +41,8 @@ class EInkDisplay {
     displayWindow(x, y, w, h);
   }
   void requestResync(uint8_t = 0) {}
+  bool releaseFramebufferForSync() { return true; }
+  bool restoreFramebufferAfterSync() { return true; }
 
   RefreshMode lastMode = FAST_REFRESH;
   uint16_t lastWindow[4] = {0, 0, 0, 0};

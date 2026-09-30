@@ -951,6 +951,15 @@ bool CompanionBleService::applyCardPayload(const std::string& payload) {
     return false;
   }
 
+  // Enforce encryption when a central is connected: incoming BLE cards require
+  // a bonded/encrypted link. Boot-time persisted seeds (seedPersistedCard) run
+  // while disconnected and bypass this check.
+  if (isConnected() && !isEncrypted()) {
+    LOG_ERR("X4CMP", "Card rejected: BLE link is not encrypted");
+    setStatus(L10N("Unencrypted card rejected", "Scheda non cifrata rifiutata"));
+    return false;
+  }
+
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload);
   if (err) {

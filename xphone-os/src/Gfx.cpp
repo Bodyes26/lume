@@ -1,3 +1,5 @@
+#include <Utf8.h>
+
 #include "Gfx.h"
 
 #include <cstdio>
@@ -255,8 +257,28 @@ uint32_t Gfx::nextCodepoint(const char** s) {
   return cp;
 }
 
+// Compose supported Latin/Vietnamese accent pairs for display only. The
+// existing Utf8 table uses marks U+0300..U+036F (lead bytes 0xCC/0xCD).
+// Keep ASCII and precomposed text allocation-free; retain the full input
+// length on the composition path, including text longer than a UI line.
+const char* Gfx::composeForUi(const char* src, std::string& scratch) const {
+  if (!src) return src;
+  bool maybeHasMarks = false;
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(src); *p; p++) {
+    if (*p == 0xCC || *p == 0xCD) {
+      maybeHasMarks = true;
+      break;
+    }
+  }
+  if (!maybeHasMarks) return src;
+  scratch = utf8ComposeNfc(src);
+  return scratch.c_str();
+}
+
 bool Gfx::canRender(const XpFont& f, const char* text) const {
   if (!text) return false;
+  std::string buf;
+  text = composeForUi(text, buf);
   uint32_t cp;
   while ((cp = nextCodepoint(&text)) != 0) {
     if (cp == ' ') continue;
@@ -355,6 +377,8 @@ void Gfx::blitGlyph(const XpFont& f, const EpdGlyph* g, const int penX, const in
 void Gfx::drawTextScaled(const XpFont& f, const int x, const int y, const char* text,
                          const int scale, const bool black) {
   if (!text || scale < 1) return;
+  std::string buf;
+  text = composeForUi(text, buf);
   if (scale == 1) {
     drawText(f, x, y, text, black);
     return;
@@ -394,6 +418,8 @@ void Gfx::drawTextScaled(const XpFont& f, const int x, const int y, const char* 
 
 void Gfx::drawTextScaledCentered(const XpFont& f, const int cx, const int y, const char* text,
                                  const int scale, const bool black) {
+  std::string buf;
+  text = composeForUi(text, buf);
   drawTextScaled(f, cx - textWidthScaled(f, text, scale) / 2, y, text, scale, black);
 }
 
@@ -410,11 +436,14 @@ int Gfx::capTopOffset(const XpFont& f) const {
 }
 
 int Gfx::textWidthScaled(const XpFont& f, const char* text, const int scale) const {
+  std::string buf;
+  text = composeForUi(text, buf);
   return textWidth(f, text) * (scale < 1 ? 1 : scale);
 }
-
 int Gfx::textWidth(const XpFont& f, const char* text) const {
   if (!text) return 0;
+  std::string buf;
+  text = composeForUi(text, buf);
   int32_t advFp = 0;  // 12.4 fixed-point accumulator
   uint32_t cp;
   while ((cp = nextCodepoint(&text)) != 0) {
@@ -427,6 +456,8 @@ int Gfx::textWidth(const XpFont& f, const char* text) const {
 
 void Gfx::drawText(const XpFont& f, const int x, const int y, const char* text, const bool black) {
   if (!text) return;
+  std::string buf;
+  text = composeForUi(text, buf);
   int32_t advFp = 0;  // 12.4 fixed-point pen position relative to x
   uint32_t cp;
   while ((cp = nextCodepoint(&text)) != 0) {
@@ -439,9 +470,10 @@ void Gfx::drawText(const XpFont& f, const int x, const int y, const char* text, 
 }
 
 void Gfx::drawTextCentered(const XpFont& f, const int cx, const int y, const char* text, const bool black) {
+  std::string buf;
+  text = composeForUi(text, buf);
   drawText(f, cx - textWidth(f, text) / 2, y, text, black);
 }
-
 // M3 — greedy word wrap (Gfx.h contract). Line slices always end on UTF-8
 // codepoint boundaries because the scanner only ever stops at positions
 // returned by nextCodepoint(); multibyte glyphs the fonts lack fall back to
@@ -460,6 +492,8 @@ int Gfx::wrapText(const XpFont& f, const int x, int y, const char* text, const i
                   const int maxLines, const bool black, const bool draw) {
   if (!text || !text[0] || maxWidth <= 0 || maxLines <= 0) return 0;
 
+  std::string buf;
+  text = composeForUi(text, buf);
   int lines = 0;
   const char* pos = text;
   while (*pos && lines < maxLines) {

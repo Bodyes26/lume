@@ -17,7 +17,7 @@ struct Frame {
 };
 
 Frame gQueue[kQueueFrames];
-volatile uint8_t gHead = 0, gCount = 0;
+uint8_t gHead = 0, gCount = 0;
 portMUX_TYPE gLock = portMUX_INITIALIZER_UNLOCKED;
 
 bool gActive = false;
